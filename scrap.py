@@ -1,5 +1,4 @@
 
-
 import csv
 import html as htmllib
 import json
@@ -14,21 +13,15 @@ from urllib.parse import urljoin, urlparse, urldefrag
 import requests
 from bs4 import BeautifulSoup, NavigableString
 
-# ================= PASTE YOUR LIST HERE =================
-PARTNERS = [
 
-]
-# ========================================================
 
 OUTPUT_CSV = "partner_locations.csv"
 UNPARSED_CSV = "unparsed_addresses.csv"
-MODE = "browser"          # "browser" = most complete (recommended) | "fast" = requests, browser only if empty
 FOLLOW_SUBPAGES = True    # open per-location sub-pages linked from your pages
 MAX_SUBPAGES = 80         # per company
-WORKERS_BROWSER = 4
-WORKERS_FAST = 8
+WORKERS = 8
 TIMEOUT = 20
-SAVE_PAGES = False        # True = save every rendered page to ./pages for checking
+SAVE_PAGES = False        # True = save every downloaded page to ./pages for checking
 PAGES_DIR = "pages"
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -456,70 +449,6 @@ def requests_fetcher():
     return fetch
 
 
-class BrowserFetcher:
-    """One Chromium per worker thread. Captures JSON the page downloads (store locators, maps)."""
-    MORE_BUTTONS = re.compile(r"load more|view all|show all|show more|see all|more locations", re.I)
-
-    def __init__(self):
-        from playwright.sync_api import sync_playwright
-        self.pw = sync_playwright().start()
-        self.browser = self.pw.chromium.launch(headless=True)
-        self.ctx = self.browser.new_context(user_agent=UA, viewport={"width": 1366, "height": 900})
-        self.ctx.route("**/*", lambda route: route.abort()
-                       if route.request.resource_type in ("image", "media", "font") else route.continue_())
-        self.page = self.ctx.new_page()
-
-    def __call__(self, url, light=False):
-        page, responses = self.page, []
-        handler = lambda r: responses.append(r)
-        page.on("response", handler)
-        try:
-            resp = page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT * 1500)
-            try:
-                page.wait_for_load_state("networkidle", timeout=5000 if light else 10000)
-            except Exception:
-                pass
-            if not light:
-                for _ in range(5):                         # trigger lazy loading
-                    page.mouse.wheel(0, 5000)
-                    page.wait_for_timeout(400)
-                for _ in range(8):                         # expand "load more" lists
-                    btn = page.locator("button, [role=button]").filter(has_text=self.MORE_BUTTONS)
-                    try:
-                        if btn.count() == 0 or not btn.first.is_visible():
-                            break
-                        btn.first.click(timeout=3000)
-                        page.wait_for_timeout(1500)
-                    except Exception:
-                        break
-            if resp is not None and not resp.ok:
-                return None, None, []
-            html, final = page.content(), page.url
-        except Exception:
-            return None, None, []
-        finally:
-            page.remove_listener("response", handler)
-
-        jsons = []
-        for r in responses:
-            try:
-                ct = (r.headers or {}).get("content-type", "")
-                if "json" in ct or "admin-ajax" in r.url:
-                    t = r.text()
-                    if t and len(t) < 5_000_000:
-                        jsons.append(t)
-            except Exception:
-                pass
-        return final, html, jsons
-
-    def close(self):
-        try:
-            self.browser.close()
-            self.pw.stop()
-        except Exception:
-            pass
-
-
 def is_thin(html):
     text = clean(BeautifulSoup(html, "lxml").get_text(" "))
     return len(text) < 500 or "enable javascript" in text.lower()
@@ -604,8 +533,8 @@ def scrape_company(company, urls, fetch, verbose=False):
     return records, clean_unp, pages, thin
 
 
-def run_company(company, urls, mode, verbose):
-    fetch = BrowserFetcher() if mode == "browser" else requests_fetcher()
+def run_company(company, urls, verbose):
+    fetch = requests_fetcher()
     try:
         return scrape_company(company, urls, fetch, verbose)
     finally:
@@ -629,19 +558,11 @@ def main():
         return
     verbose = only is not None
 
-    mode = MODE
-    if mode == "browser":
-        try:
-            import playwright  # noqa: F401
-        except ImportError:
-            print("Playwright not installed -> using fast mode (will miss JS-loaded locations).")
-            mode = "fast"
-
     results = {}
-    workers = 1 if verbose else (WORKERS_BROWSER if mode == "browser" else WORKERS_FAST)
+    workers = 1 if verbose else WORKERS
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(run_company, n, us, mode, verbose): n for n, us in groups.items()}
+        futs = {ex.submit(run_company, n, us, verbose): n for n, us in groups.items()}
         for f in as_completed(futs):
             n = futs[f]
             try:
@@ -649,22 +570,9 @@ def main():
             except Exception as e:
                 print(f"[error] {n}: {e}")
                 results[n] = ([], [], 0, True)
-            recs, unp, pages, _ = results[n]
-            print(f"{n}: {len(recs)} locations, {len(unp)} unparsed ({pages} pages)")
-
-    if mode == "fast":   # retry weak companies in the browser
-        retry = [n for n, (recs, _, _, thin) in results.items() if thin or not recs]
-        if retry:
-            try:
-                import playwright  # noqa: F401
-                print(f"\nBrowser retry for {len(retry)} compan(ies)...")
-                for n in retry:
-                    r = run_company(n, groups[n], "browser", verbose)
-                    if len(r[0]) >= len(results[n][0]):
-                        results[n] = r
-                    print(f"[browser] {n}: {len(r[0])} locations")
-            except ImportError:
-                pass
+            recs, unp, pages, thin = results[n]
+            note = "  (page looks JavaScript-loaded - addresses may not be in the HTML)" if thin else ""
+            print(f"{n}: {len(recs)} locations, {len(unp)} unparsed ({pages} pages){note}")
 
     rows, unparsed_rows = [], []
     for n in groups:
