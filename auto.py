@@ -6,9 +6,11 @@ from datetime import datetime
 
 import win32com.client as win32
 
-MAIN_REPORT_NAME = ""      
+
+MAIN_REPORT_NAME = ""      # file name (without extension) of the main report
 EXCEL_EXTS = (".xlsx", ".xlsm", ".xls", ".xlsb")
-MAKE_BACKUP = True                        
+MAKE_BACKUP = True                        # copies the report to a "Backup" folder before changing it
+
 
 JOBS = [
     # ---------------- 1. Top 15 ----------------
@@ -16,16 +18,11 @@ JOBS = [
         "name": "Top 15",
         "website_file": "1 Top15",
         "website_sheet": None,
+        "align_from_row": 4,
         "remove_blank_rows": True,
-        "shift": {
-            "start_row": 6,
-            "from_cols": ("D", "I"),
-            "left_by": 1,
-        },
         "copy": {
             "start_row": 9,
-            "cols": ("C", "H"),
-            "skip_merged_rows": False,
+            "cols": ("A", "F"),
         },
         "target_sheet": "d_Top 15",
         "target_cell": "A5",
@@ -38,12 +35,11 @@ JOBS = [
     #     "name": "",
     #     "website_file": "2 ",
     #     "website_sheet": None,
+    #     "align_from_row": 4,
     #     "remove_blank_rows": True,
-    #     "shift": None,
     #     "copy": {
     #         "start_row": 0,
     #         "cols": ("A", "A"),
-    #         "skip_merged_rows": False,
     #     },
     #     "target_sheet": "",
     #     "target_cell": "A5",
@@ -127,11 +123,11 @@ def backup_report(path):
 
 
 # =====================================================================
-# READ + CLEAN website SHEET (all done in memory, website file is not changed)
+# READ + CLEAN website SHEET (done in memory, website file is not changed)
 # =====================================================================
 
 def read_sheet(ws):
-    """Return list of rows: {'values': [...], 'merged': bool}, plus last column number."""
+    """Return all rows of the sheet as lists, starting from A1."""
     ur = ws.UsedRange
     last_row = ur.Row + ur.Rows.Count - 1
     last_col = ur.Column + ur.Columns.Count - 1
@@ -140,43 +136,26 @@ def read_sheet(ws):
     if not isinstance(data, tuple):          # single cell sheet
         data = ((data,),)
 
-    rows = []
-    for r in range(1, last_row + 1):
-        # MergeCells returns True / False / None (None = some cells merged)
-        merged = ws.Range(ws.Cells(r, 1), ws.Cells(r, last_col)).MergeCells
-        rows.append({"values": list(data[r - 1]), "merged": merged is not False})
-    return rows, last_col
+    return [list(row) for row in data], last_col
 
 
 def transform(rows, last_col, job):
-    # Make every row wide enough for the columns we use
-    needed = last_col
-    if job.get("shift"):
-        needed = max(needed, col_num(job["shift"]["from_cols"][1]))
-    needed = max(needed, col_num(job["copy"]["cols"][1]))
-    for row in rows:
-        row["values"] += [None] * (needed - len(row["values"]))
+    width = max(last_col, col_num(job["copy"]["cols"][1]))
 
-    # 1. Remove fully empty rows
+    # 1. From align_from_row to the end: remove leading empty cells so data starts in column A
+    start = job.get("align_from_row", 1)
+    for i in range(start - 1, len(rows)):
+        v = rows[i]
+        first = next((k for k, x in enumerate(v) if not is_blank(x)), None)
+        if first:                                # None = empty row, 0 = already starts at A
+            rows[i] = v[first:]
+
+    # Same width for every row
+    rows = [r + [None] * (width - len(r)) for r in rows]
+
+    # 2. Remove fully empty rows
     if job.get("remove_blank_rows"):
-        rows = [r for r in rows if not all(is_blank(v) for v in r["values"])]
-
-    # 2. Shift data left (merged rows are block boundaries and are left as they are)
-    sh = job.get("shift")
-    if sh:
-        c1 = col_num(sh["from_cols"][0]) - 1
-        c2 = col_num(sh["from_cols"][1]) - 1
-        n = sh["left_by"]
-        for i in range(sh["start_row"] - 1, len(rows)):
-            row = rows[i]
-            if row["merged"]:
-                continue
-            v = row["values"]
-            moved = v[c1:c2 + 1]
-            for k, val in enumerate(moved):
-                v[c1 - n + k] = val
-            for k in range(c2 - n + 1, c2 + 1):
-                v[k] = None
+        rows = [r for r in rows if not all(is_blank(x) for x in r)]
 
     # 3. Pick the rows/columns to copy
     cp = job["copy"]
@@ -185,11 +164,9 @@ def transform(rows, last_col, job):
     out = []
     for i in range(cp["start_row"] - 1, len(rows)):
         row = rows[i]
-        if all(is_blank(v) for v in row["values"]):
+        if all(is_blank(x) for x in row):
             break
-        if cp.get("skip_merged_rows") and row["merged"]:
-            continue
-        out.append(tuple(None if is_blank(x) else x for x in row["values"][a:b + 1]))
+        out.append(tuple(None if is_blank(x) else x for x in row[a:b + 1]))
     return out, (b - a + 1)
 
 
