@@ -1,30 +1,6 @@
-import os
-import sys
-import shutil
-import queue
-import threading
-import traceback
-from datetime import datetime
-
-import tkinter as tk
-from tkinter import ttk, messagebox
-
-import pythoncom
-import win32com.client as win32
 
 
-MAIN_REPORT_NAME = ""      
-website_FOLDER_NAME = "website"                 
-MATCH_CHARS = 10                          
-EXCEL_EXTS = (".xlsx", ".xlsm", ".xls", ".xlsb")
-MAKE_BACKUP = True                        
-SAVE_website_CHANGES = True                  
-
-# =====================================================================
-# HELPERS
-# =====================================================================
-
-XL_TO_LEFT = -4159            
+XL_TO_LEFT = -4159           
 
 
 def base_folder():
@@ -33,8 +9,8 @@ def base_folder():
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def website_folder():
-    return os.path.join(base_folder(), website_FOLDER_NAME)
+def Website_folder():
+    return os.path.join(base_folder(), Website_FOLDER_NAME)
 
 
 def col_num(letter):
@@ -73,9 +49,9 @@ def match_key(name):
     return name[:MATCH_CHARS].strip().lower()
 
 
-def find_website(name):
+def find_Website(name):
     key = match_key(name)
-    matches = [p for p in excel_files(website_folder())
+    matches = [p for p in excel_files(Website_folder())
                if match_key(os.path.splitext(os.path.basename(p))[0]).startswith(key)]
     if not matches:
         return None
@@ -104,7 +80,6 @@ def read_values(ws):
 
 
 def key_col_of(row, cfg):
-    """0-based column of the key if it is the FIRST value in the row, else None."""
     first = next((k for k, x in enumerate(row) if not is_blank(x)), None)
     if first is None:
         return None
@@ -123,7 +98,7 @@ def fill_missing_labels(ws, job, log):
     labels = cfg["labels"]
     n = len(labels)
 
-    def val(r, c):                                       
+    def val(r, c):                                        
         if r >= len(rows) or c >= len(rows[r]):
             return None
         return rows[r][c]
@@ -145,7 +120,8 @@ def fill_missing_labels(ws, job, log):
     log(f"  '{cfg['key']}' label sets filled: {filled}")
 
 
-def clean_website_sheet(ws, job, log):
+
+def clean_Website_sheet(ws, job, log):
     start = job.get("align_from_row", 1)
 
     ws.Cells.UnMerge()
@@ -153,7 +129,7 @@ def clean_website_sheet(ws, job, log):
     if job.get("remove_blank_rows", True):
         rows, last_row, _ = read_values(ws)
         removed = 0
-        for r in range(last_row, start - 1, -1):         
+        for r in range(last_row, start - 1, -1):          
             if all(is_blank(x) for x in rows[r - 1]):
                 ws.Rows(r).Delete()
                 removed += 1
@@ -171,7 +147,7 @@ def clean_website_sheet(ws, job, log):
         first = next((k for k, x in enumerate(v) if not is_blank(x)), None)
         if cfg and first and key_col_of(v, cfg) == first:
             first -= 1                                    
-        if first:                                        
+        if first:                                         
             ws.Range(ws.Cells(r, 1), ws.Cells(r, first)).Delete(XL_TO_LEFT)
             moved += 1
     log(f"  Rows moved to start at column A: {moved}")
@@ -180,11 +156,12 @@ def clean_website_sheet(ws, job, log):
         rows, last_row, last_col = read_values(ws)
         removed = 0
         if last_row >= start:
-            for c in range(last_col, 0, -1):             
+            for c in range(last_col, 0, -1):              # right to left
                 if all(is_blank(rows[r - 1][c - 1]) for r in range(start, last_row + 1)):
                     ws.Range(ws.Cells(start, c), ws.Cells(last_row, c)).Delete(XL_TO_LEFT)
                     removed += 1
         log(f"  Blank columns removed: {removed}")
+
 
 def get_copy_data(ws, job):
     rows, _, _ = read_values(ws)
@@ -195,33 +172,34 @@ def get_copy_data(ws, job):
     out = []
     for i in range(cp["start_row"] - 1, len(rows)):
         row = rows[i] + [None] * (b + 1 - len(rows[i]))
-        if all(is_blank(x) for x in row):                 
+        if all(is_blank(x) for x in row):                
             break
         out.append(tuple(None if is_blank(x) else x for x in row[a:b + 1]))
     return out, (b - a + 1)
 
 
-def get_website_data(excel, job, log, read_only):
-    """Open the website file, clean it, return the data to paste."""
-    path = find_website(job["website_file"])
+def get_Website_data(excel, job, log, read_only):
+    """Open the Website file, clean it, return the data to paste."""
+    path = find_Website(job["Website_file"])
     if not path:
-        raise FileNotFoundError(f"No file starting with '{job['website_file'][:MATCH_CHARS]}' in the website folder")
-    log(f"  website file: {os.path.basename(path)}")
+        raise FileNotFoundError(f"No file starting with '{job['Website_file'][:MATCH_CHARS]}' in the Website folder")
+    log(f"  Website file: {os.path.basename(path)}")
 
     wb = excel.Workbooks.Open(path, 0, read_only)
     try:
-        if not read_only and SAVE_website_CHANGES and wb.ReadOnly:
-            raise RuntimeError("website file is open somewhere else. Close it and try again.")
-        ws = wb.Worksheets(job["website_sheet"]) if job.get("website_sheet") else wb.Worksheets(1)
+        if not read_only and SAVE_Website_CHANGES and wb.ReadOnly:
+            raise RuntimeError("Website file is open somewhere else. Close it and try again.")
+        ws = wb.Worksheets(job["Website_sheet"]) if job.get("Website_sheet") else wb.Worksheets(1)
 
-        clean_website_sheet(ws, job, log)
-        if not read_only and SAVE_website_CHANGES:
+        clean_Website_sheet(ws, job, log)
+        if not read_only and SAVE_Website_CHANGES:
             wb.Save()
-            log("  website file cleaned and saved")
+            log("  Website file cleaned and saved")
 
         return get_copy_data(ws, job)
     finally:
         wb.Close(SaveChanges=False)
+
 
 def paste(report_wb, job, data, ncols):
     ws = report_wb.Worksheets(job["target_sheet"])
@@ -236,7 +214,6 @@ def paste(report_wb, job, data, ncols):
 
     if data:
         ws.Range(ws.Cells(r0, c0), ws.Cells(r0 + len(data) - 1, c0 + ncols - 1)).Value = tuple(data)
-
 
 
 def norm(v):
@@ -274,12 +251,10 @@ def compare(report_wb, job, data, ncols, log):
 
     for (r, c, e, a) in diffs[:5]:
         cell = ws.Cells(r, c).Address.replace("$", "")
-        log(f"    {cell}: website = {e!r} | report = {a!r}")
+        log(f"    {cell}: Website = {e!r} | report = {a!r}")
     if len(diffs) > 5:
         log(f"    ... and {len(diffs) - 5} more")
     return len(diffs)
-
-
 
 def new_excel():
     excel = win32.DispatchEx("Excel.Application")
@@ -311,7 +286,7 @@ def run_update(log, status, progress):
             log(f"--- {job['name']} ---")
             status(i, "Running...", "busy")
             try:
-                data, ncols = get_website_data(excel, job, log, read_only=False)
+                data, ncols = get_Website_data(excel, job, log, read_only=False)
                 paste(report_wb, job, data, ncols)
                 log(f"  Pasted {len(data)} rows into '{job['target_sheet']}' at {job['target_cell']}")
                 status(i, f"Done · {len(data)} rows", "ok")
@@ -366,7 +341,7 @@ def run_qc(log, status, progress):
             log(f"--- QC {job['name']} ---")
             status(i, "Checking...", "busy")
             try:
-                data, ncols = get_website_data(excel, job, log, read_only=True)
+                data, ncols = get_Website_data(excel, job, log, read_only=True)
                 n = compare(report_wb, job, data, ncols, log)
                 if n == 0:
                     log(f"  OK · {len(data)} rows match")
@@ -400,59 +375,106 @@ def run_qc(log, status, progress):
 # UI
 # =====================================================================
 
+import time
+
 C = {
-    "bg": "#F4F6FA",
-    "card": "#FFFFFF",
-    "border": "#E3E7EF",
-    "text": "#1F2937",
-    "muted": "#6B7280",
-    "header": "#111827",
+    "bg": "#F3F5F9",          
+    "panel": "#FFFFFF",      
+    "panel2": "#F1F4F9",     
+    "row_alt": "#F8FAFC",
+    "border": "#E2E7EF",
+    "text": "#1E293B",
+    "muted": "#64748B",
     "accent": "#2563EB",
     "accent_hover": "#1D4ED8",
-    "qc": "#0F766E",
-    "qc_hover": "#0B5F59",
-    "ok": "#15803D",
+    "qc": "#0D9488",
+    "qc_hover": "#0F766E",
+    "disabled": "#CBD5E1",
+    "ok": "#059669",
     "bad": "#DC2626",
     "busy": "#D97706",
-    "idle": "#6B7280",
-    "log_bg": "#0F172A",
-    "log_fg": "#CBD5E1",
+    "idle": "#64748B",
+    "head": "#2563EB",
+    "sb": "#D5DCE6",
+    "sb_active": "#B8C2D1",
+    "term_bg": "#FBFCFE",
+    "term_fg": "#334155",
+    "term_dim": "#A0AEC0",
 }
 FONT = "Segoe UI"
+MONO = "Consolas"
 
 
-class FlatButton(tk.Label):
+def fmt_clock(sec):
+    sec = int(sec)
+    m, s = divmod(sec, 60)
+    h, m = divmod(m, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
-    def __init__(self, parent, text, command, bg, hover, fg="white", **kw):
-        super().__init__(parent, text=text, bg=bg, fg=fg, cursor="hand2",
-                         font=(FONT, 10, "bold"), padx=18, pady=8, **kw)
-        self._bg, self._hover, self._cmd, self._enabled = bg, hover, command, True
-        self.bind("<Enter>", lambda e: self._enabled and self.config(bg=self._hover))
-        self.bind("<Leave>", lambda e: self.config(bg=self._bg if self._enabled else "#9CA3AF"))
-        self.bind("<Button-1>", lambda e: self._enabled and self._cmd())
+
+def fmt_took(sec):
+    return f"{sec:.1f}s" if sec < 60 else f"{int(sec // 60)}m {int(sec % 60):02d}s"
+
+
+def short_path(p, n=64):
+    return p if len(p) <= n else p[:22] + " … " + p[-(n - 25):]
+
+
+def round_rect(c, x1, y1, x2, y2, r, **kw):
+    pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
+           x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+    return c.create_polygon(pts, smooth=True, **kw)
+
+
+class RoundButton(tk.Canvas):
+    """Rounded flat button."""
+
+    def __init__(self, parent, text, command, color, hover, width=104, height=34):
+        super().__init__(parent, width=width, height=height, bg=parent["bg"],
+                         highlightthickness=0, bd=0, cursor="hand2")
+        self.color, self.hover, self.cmd, self.enabled = color, hover, command, True
+        self.shape = round_rect(self, 1, 1, width - 1, height - 1, 9, fill=color, outline="")
+        self.create_text(width / 2, height / 2, text=text, fill="white", font=(FONT, 10, "bold"))
+        self.bind("<Enter>", lambda e: self.enabled and self.itemconfig(self.shape, fill=self.hover))
+        self.bind("<Leave>", lambda e: self.itemconfig(self.shape, fill=self.color if self.enabled else C["disabled"]))
+        self.bind("<Button-1>", lambda e: self.enabled and self.cmd())
 
     def set_enabled(self, on):
-        self._enabled = on
-        self.config(bg=self._bg if on else "#9CA3AF", cursor="hand2" if on else "arrow")
+        self.enabled = on
+        self.itemconfig(self.shape, fill=self.color if on else C["disabled"])
+        self.config(cursor="hand2" if on else "arrow")
+
+
+class GhostButton(tk.Label):
+    """Small text button for toolbars."""
+
+    def __init__(self, parent, text, command):
+        super().__init__(parent, text=text, bg=parent["bg"], fg=C["muted"], cursor="hand2",
+                         font=(FONT, 9), padx=8, pady=3)
+        self.bind("<Enter>", lambda e: self.config(fg=C["text"], bg=C["panel2"]))
+        self.bind("<Leave>", lambda e: self.config(fg=C["muted"], bg=parent["bg"]))
+        self.bind("<Button-1>", lambda e: command())
 
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("State Rx Report Updater")
+        self.title("State Rx Updater")
         self.configure(bg=C["bg"])
-        self.geometry("880x620")
-        self.minsize(780, 540)
+        self.geometry("760x680")
+        self.minsize(680, 540)
+
         self.q = queue.Queue()
         self.busy = False
         self.log_lines = []
+        self.t0 = None
+        self.job_t0 = {}
 
         self._style()
         self._build()
         self.refresh()
         self.after(100, self._poll)
 
-        # center on screen
         self.update_idletasks()
         x = (self.winfo_screenwidth() - self.winfo_width()) // 2
         y = (self.winfo_screenheight() - self.winfo_height()) // 3
@@ -462,95 +484,114 @@ class App(tk.Tk):
     def _style(self):
         s = ttk.Style(self)
         s.theme_use("clam")
-        s.configure("Treeview", background=C["card"], fieldbackground=C["card"],
-                    foreground=C["text"], rowheight=30, borderwidth=0, font=(FONT, 10))
-        s.configure("Treeview.Heading", background="#F9FAFB", foreground=C["muted"],
-                    font=(FONT, 9, "bold"), borderwidth=0, relief="flat", padding=(8, 6))
-        s.map("Treeview.Heading", background=[("active", "#F3F4F6")])
-        s.map("Treeview", background=[("selected", "#EEF2FF")], foreground=[("selected", C["text"])])
+        s.configure("Treeview", background=C["panel"], fieldbackground=C["panel"], foreground=C["text"],
+                    rowheight=24, borderwidth=0, font=(FONT, 9))
+        s.configure("Treeview.Heading", background=C["panel2"], foreground=C["muted"],
+                    font=(FONT, 8, "bold"), borderwidth=0, relief="flat", padding=(8, 4))
+        s.map("Treeview.Heading", background=[("active", C["panel2"])])
+        s.map("Treeview", background=[("selected", C["panel2"])], foreground=[("selected", C["text"])])
         s.layout("Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
-        s.configure("Bar.Horizontal.TProgressbar", troughcolor=C["border"], background=C["accent"],
-                    bordercolor=C["border"], lightcolor=C["accent"], darkcolor=C["accent"], thickness=6)
-        s.configure("Vertical.TScrollbar", background=C["border"], troughcolor=C["card"],
-                    bordercolor=C["card"], arrowcolor=C["muted"])
+        s.configure("Thin.Horizontal.TProgressbar", troughcolor=C["border"], background=C["accent"],
+                    bordercolor=C["bg"], lightcolor=C["accent"], darkcolor=C["accent"], thickness=4)
+        s.configure("Dark.Vertical.TScrollbar", background=C["sb"], troughcolor=C["panel"],
+                    bordercolor=C["panel"], lightcolor=C["sb"], darkcolor=C["sb"],
+                    arrowcolor=C["muted"], gripcount=0, relief="flat", arrowsize=10)
+        s.map("Dark.Vertical.TScrollbar", background=[("active", C["sb_active"])])
 
-    def _card(self, parent):
-        return tk.Frame(parent, bg=C["card"], highlightbackground=C["border"], highlightthickness=1)
+    def _panel(self, parent, **pack):
+        f = tk.Frame(parent, bg=C["panel"], highlightbackground=C["border"],
+                     highlightcolor=C["border"], highlightthickness=1)
+        f.pack(**pack)
+        return f
+
+    def _section(self, parent, title, right=None):
+        row = tk.Frame(parent, bg=C["bg"])
+        row.pack(fill="x", pady=(12, 5))
+        tk.Label(row, text=title, bg=C["bg"], fg=C["muted"], font=(FONT, 8, "bold")).pack(side="left")
+        return row
 
     # ---------- layout ----------
     def _build(self):
-        # Header
-        head = tk.Frame(self, bg=C["header"])
-        head.pack(fill="x")
-        tk.Label(head, text="State Rx Report Updater", bg=C["header"], fg="white",
-                 font=(FONT, 15, "bold")).pack(side="left", padx=20, pady=(14, 14))
-        tk.Label(head, text="website  →  report", bg=C["header"], fg="#9CA3AF",
-                 font=(FONT, 10)).pack(side="left", pady=(18, 14))
+        root = tk.Frame(self, bg=C["bg"])
+        root.pack(fill="both", expand=True, padx=16, pady=(14, 12))
 
-        body = tk.Frame(self, bg=C["bg"])
-        body.pack(fill="both", expand=True, padx=18, pady=14)
+        # Title row
+        top = tk.Frame(root, bg=C["bg"])
+        top.pack(fill="x")
+        tk.Label(top, text="Updater", bg=C["bg"], fg=C["text"],
+                 font=(FONT, 14, "bold")).pack(side="left")
+        tk.Label(top, text="  Website → report", bg=C["bg"], fg=C["muted"],
+                 font=(FONT, 9)).pack(side="left", pady=(5, 0))
+        self.found_pill = tk.Label(top, text="", bg=C["panel"], fg=C["text"],
+                                   font=(FONT, 8, "bold"), padx=10, pady=3)
+        self.found_pill.pack(side="right")
 
-        # Report + folder card
-        info = self._card(body)
-        info.pack(fill="x")
+        # Info card
+        info = self._panel(root, fill="x", pady=(10, 0))
         info.columnconfigure(1, weight=1)
+        tk.Label(info, text="REPORT", bg=C["panel"], fg=C["muted"], font=(FONT, 8, "bold"),
+                 width=8, anchor="w").grid(row=0, column=0, sticky="w", padx=(12, 0), pady=(8, 2))
+        self.report_lbl = tk.Label(info, text="", bg=C["panel"], fg=C["text"], font=(FONT, 9, "bold"), anchor="w")
+        self.report_lbl.grid(row=0, column=1, sticky="w", pady=(8, 2))
+        tk.Label(info, text="Website", bg=C["panel"], fg=C["muted"], font=(FONT, 8, "bold"),
+                 width=8, anchor="w").grid(row=1, column=0, sticky="w", padx=(12, 0), pady=(2, 8))
+        self.folder_lbl = tk.Label(info, text="", bg=C["panel"], fg=C["muted"], font=(FONT, 9), anchor="w")
+        self.folder_lbl.grid(row=1, column=1, sticky="w", pady=(2, 8))
+        tools = tk.Frame(info, bg=C["panel"])
+        tools.grid(row=0, column=2, rowspan=2, padx=8)
+        GhostButton(tools, "⟳  Refresh", self.refresh).pack(side="left")
+        GhostButton(tools, "📂  Folder", self.open_folder).pack(side="left")
 
-        tk.Label(info, text="MAIN REPORT", bg=C["card"], fg=C["muted"],
-                 font=(FONT, 8, "bold")).grid(row=0, column=0, sticky="w", padx=14, pady=(10, 0))
-        self.report_lbl = tk.Label(info, text="", bg=C["card"], fg=C["text"], font=(FONT, 11, "bold"), anchor="w")
-        self.report_lbl.grid(row=1, column=0, columnspan=2, sticky="w", padx=14)
-
-        tk.Label(info, text="website FOLDER", bg=C["card"], fg=C["muted"],
-                 font=(FONT, 8, "bold")).grid(row=2, column=0, sticky="w", padx=14, pady=(8, 0))
-        self.folder_lbl = tk.Label(info, text="", bg=C["card"], fg=C["text"], font=(FONT, 9), anchor="w")
-        self.folder_lbl.grid(row=3, column=0, columnspan=2, sticky="w", padx=14, pady=(0, 10))
-
-        tk.Button(info, text="⟳  Refresh", command=self.refresh, relief="flat", bd=0,
-                  bg="#EEF2FF", fg=C["accent"], activebackground="#E0E7FF", cursor="hand2",
-                  font=(FONT, 9, "bold"), padx=12, pady=4).grid(row=0, column=2, rowspan=2, padx=14, pady=10, sticky="e")
-        tk.Button(info, text="📂  Open folder", command=self.open_folder, relief="flat", bd=0,
-                  bg="#F3F4F6", fg=C["text"], activebackground="#E5E7EB", cursor="hand2",
-                  font=(FONT, 9), padx=12, pady=4).grid(row=2, column=2, rowspan=2, padx=14, pady=(0, 10), sticky="e")
-
-        # Files table
-        table_card = self._card(body)
-        table_card.pack(fill="both", expand=True, pady=(12, 0))
-
+        # Website files (compact)
+        self._section(root, "Website FILES")
+        table = self._panel(root, fill="x")
         cols = ("no", "file", "sheet", "status")
-        self.tree = ttk.Treeview(table_card, columns=cols, show="headings", height=7, selectmode="none")
-        for cid, title, w, anchor in [("no", "#", 40, "center"), ("file", "website FILE", 360, "w"),
-                                       ("sheet", "TARGET SHEET", 160, "w"), ("status", "STATUS", 170, "w")]:
+        self.tree = ttk.Treeview(table, columns=cols, show="headings", height=5, selectmode="none")
+        for cid, title, w, anchor in [("no", "#", 34, "center"), ("file", "FILE", 300, "w"),
+                                       ("sheet", "TARGET SHEET", 130, "w"), ("status", "STATUS", 190, "w")]:
             self.tree.heading(cid, text=title, anchor=anchor)
             self.tree.column(cid, width=w, anchor=anchor, stretch=(cid == "file"))
         for tag in ("ok", "bad", "busy", "idle"):
             self.tree.tag_configure(tag, foreground=C[tag])
-        sb = ttk.Scrollbar(table_card, orient="vertical", command=self.tree.yview)
+        self.tree.tag_configure("alt", background=C["row_alt"])
+        sb = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview, style="Dark.Vertical.TScrollbar")
         self.tree.configure(yscrollcommand=sb.set)
-        self.tree.pack(side="left", fill="both", expand=True, padx=(1, 0), pady=1)
+        self.tree.pack(side="left", fill="x", expand=True)
         sb.pack(side="right", fill="y")
 
-        # Log
-        log_card = tk.Frame(body, bg=C["log_bg"])
-        log_card.pack(fill="both", pady=(12, 0))
-        self.log_txt = tk.Text(log_card, height=7, bg=C["log_bg"], fg=C["log_fg"], bd=0,
-                               font=("Consolas", 9), insertbackground=C["log_fg"], wrap="word",
-                               padx=12, pady=8, state="disabled")
-        self.log_txt.pack(fill="both", expand=True)
-        self.log_txt.tag_configure("err", foreground="#F87171")
-        self.log_txt.tag_configure("ok", foreground="#4ADE80")
-        self.log_txt.tag_configure("head", foreground="#93C5FD")
+        # Bottom bar (packed first so it is always visible)
+        self.pbar = ttk.Progressbar(root, style="Thin.Horizontal.TProgressbar", mode="determinate")
 
-        # Bottom bar
-        bar = tk.Frame(self, bg=C["bg"])
-        bar.pack(fill="x", padx=18, pady=(0, 14))
+        bar = tk.Frame(root, bg=C["bg"])
+        bar.pack(side="bottom", fill="x")
+        self.pbar.pack(side="bottom", fill="x", pady=(10, 8))
+        self.timer_lbl = tk.Label(bar, text="⏱ 00:00", bg=C["bg"], fg=C["text"], font=(MONO, 13, "bold"))
+        self.timer_lbl.pack(side="left")
         self.status_lbl = tk.Label(bar, text="Ready", bg=C["bg"], fg=C["muted"], font=(FONT, 9))
-        self.status_lbl.pack(side="left")
-        self.run_btn = FlatButton(bar, "▶  Run", self.start_run, C["accent"], C["accent_hover"])
+        self.status_lbl.pack(side="left", padx=(12, 0), pady=(3, 0))
+        self.run_btn = RoundButton(bar, "▶  Run", self.start_run, C["accent"], C["accent_hover"])
         self.run_btn.pack(side="right")
-        self.qc_btn = FlatButton(bar, "✓  QC", self.start_qc, C["qc"], C["qc_hover"])
-        self.qc_btn.pack(side="right", padx=(0, 10))
-        self.pbar = ttk.Progressbar(bar, style="Bar.Horizontal.TProgressbar", length=180, mode="determinate")
-        self.pbar.pack(side="right", padx=16)
+        self.qc_btn = RoundButton(bar, "✓  QC", self.start_qc, C["qc"], C["qc_hover"], width=88)
+        self.qc_btn.pack(side="right", padx=(0, 8))
+
+        # Output (big)
+        sec = self._section(root, "OUTPUT")
+        GhostButton(sec, "Clear", self.clear_log).pack(side="right")
+        GhostButton(sec, "Open log", self.open_log).pack(side="right")
+
+        term = tk.Frame(root, bg=C["term_bg"], highlightbackground=C["border"],
+                        highlightcolor=C["border"], highlightthickness=1)
+        term.pack(fill="both", expand=True)
+        self.log_txt = tk.Text(term, bg=C["term_bg"], fg=C["term_fg"], bd=0, font=(MONO, 9),
+                               insertbackground=C["term_fg"], wrap="word", padx=12, pady=10,
+                               state="disabled", spacing1=1, spacing3=1, highlightthickness=0, height=10)
+        lsb = ttk.Scrollbar(term, orient="vertical", command=self.log_txt.yview, style="Dark.Vertical.TScrollbar")
+        self.log_txt.configure(yscrollcommand=lsb.set)
+        self.log_txt.pack(side="left", fill="both", expand=True)
+        lsb.pack(side="right", fill="y")
+        for tag, col in (("err", C["bad"]), ("ok", C["ok"]), ("head", C["head"]),
+                         ("dim", C["term_dim"]), ("time", C["busy"])):
+            self.log_txt.tag_configure(tag, foreground=col)
 
     # ---------- data ----------
     def refresh(self):
@@ -558,26 +599,31 @@ class App(tk.Tk):
             return
         rp = find_main_report()
         if rp:
-            self.report_lbl.config(text=f"●  {os.path.basename(rp)}", fg=C["text"])
+            self.report_lbl.config(text=os.path.basename(rp), fg=C["text"])
         else:
-            self.report_lbl.config(text=f"●  '{MAIN_REPORT_NAME}' not found next to the app", fg=C["bad"])
+            self.report_lbl.config(text=f"'{MAIN_REPORT_NAME}' not found next to the app", fg=C["bad"])
 
-        wf = website_folder()
-        self.folder_lbl.config(text=wf if os.path.isdir(wf) else f"{wf}   (folder not found)",
-                               fg=C["muted"] if os.path.isdir(wf) else C["bad"])
+        wf = Website_folder()
+        ok = os.path.isdir(wf)
+        self.folder_lbl.config(text=short_path(wf) if ok else f"{short_path(wf, 48)}  (not found)",
+                               fg=C["muted"] if ok else C["bad"])
 
         self.tree.delete(*self.tree.get_children())
         found = 0
         for i, job in enumerate(JOBS):
-            p = find_website(job["website_file"])
+            p = find_Website(job["Website_file"])
             if p:
                 found += 1
                 fname, st, tag = os.path.basename(p), "Ready", "idle"
             else:
-                fname, st, tag = f"{job['website_file']}…   (not found)", "Missing", "bad"
+                fname, st, tag = f"{job['Website_file']}…  (not found)", "Missing", "bad"
+            tags = (tag, "alt") if i % 2 else (tag,)
             self.tree.insert("", "end", iid=str(i), values=(i + 1, fname, job["target_sheet"], f"●  {st}"),
-                             tags=(tag,))
-        self.status_lbl.config(text=f"{found} of {len(JOBS)} website files found")
+                             tags=tags)
+
+        all_ok = found == len(JOBS)
+        self.found_pill.config(text=f"{found} / {len(JOBS)} files found",
+                               fg=C["ok"] if all_ok else C["bad"])
         self.pbar.config(maximum=max(len(JOBS), 1), value=0)
 
     def open_folder(self):
@@ -585,6 +631,31 @@ class App(tk.Tk):
             os.startfile(base_folder())
         except Exception:
             pass
+
+    def open_log(self):
+        for name in ("update_log.txt", "qc_log.txt"):
+            p = os.path.join(base_folder(), name)
+            if os.path.exists(p):
+                try:
+                    os.startfile(p)
+                except Exception:
+                    pass
+                return
+
+    def clear_log(self):
+        if self.busy:
+            return
+        self.log_txt.config(state="normal")
+        self.log_txt.delete("1.0", "end")
+        self.log_txt.config(state="disabled")
+
+    def _write(self, msg, tag=None):
+        self.log_txt.config(state="normal")
+        if msg:
+            self.log_txt.insert("end", datetime.now().strftime("%H:%M:%S  "), "dim")
+        self.log_txt.insert("end", msg + "\n", tag)
+        self.log_txt.see("end")
+        self.log_txt.config(state="disabled")
 
     # ---------- thread-safe callbacks ----------
     def _log(self, msg=""):
@@ -602,19 +673,22 @@ class App(tk.Tk):
                 kind, val = self.q.get_nowait()
                 if kind == "log":
                     self.log_lines.append(val)
-                    tag = ("err" if "ERROR" in val or "don't match" in val else
+                    tag = ("err" if "ERROR" in val or "don't match" in val or "problem" in val else
                            "ok" if val.strip().startswith("OK") or "Report saved" in val or "no errors" in val else
                            "head" if val.startswith("---") else None)
-                    self.log_txt.config(state="normal")
-                    self.log_txt.insert("end", val + "\n", tag)
-                    self.log_txt.see("end")
-                    self.log_txt.config(state="disabled")
+                    self._write(val, tag)
                 elif kind == "status":
                     i, text, tag = val
+                    if tag == "busy":
+                        self.job_t0[i] = time.time()
+                    elif i in self.job_t0:
+                        text += f"  ·  {fmt_took(time.time() - self.job_t0.pop(i))}"
                     if self.tree.exists(str(i)):
                         v = list(self.tree.item(str(i), "values"))
                         v[3] = f"●  {text}"
-                        self.tree.item(str(i), values=v, tags=(tag,))
+                        tags = (tag, "alt") if i % 2 else (tag,)
+                        self.tree.item(str(i), values=v, tags=tags)
+                        self.tree.see(str(i))
                 elif kind == "progress":
                     self.pbar.config(value=val)
                 elif kind == "done":
@@ -622,6 +696,11 @@ class App(tk.Tk):
         except queue.Empty:
             pass
         self.after(100, self._poll)
+
+    def _tick(self):
+        if self.busy and self.t0:
+            self.timer_lbl.config(text=f"⏱ {fmt_clock(time.time() - self.t0)}")
+            self.after(500, self._tick)
 
     # ---------- run / qc ----------
     def _start(self, worker, title):
@@ -635,15 +714,17 @@ class App(tk.Tk):
         self.run_btn.set_enabled(False)
         self.qc_btn.set_enabled(False)
         self.status_lbl.config(text=f"{title} in progress…", fg=C["busy"])
+        self.timer_lbl.config(fg=C["busy"])
         self.log_lines = []
-        self.log_txt.config(state="normal")
-        self.log_txt.delete("1.0", "end")
-        self.log_txt.config(state="disabled")
+        self.job_t0 = {}
+        self.clear_log_force()
+        self.t0 = time.time()
+        self._tick()
 
         def task():
             pythoncom.CoInitialize()
             try:
-                self._log(f"{title} started {datetime.now():%d-%m-%Y %H:%M}")
+                self._log(f"{title} started")
                 errors = worker(self._log, self._status, self._progress)
             except Exception as e:
                 errors = [str(e)]
@@ -659,9 +740,14 @@ class App(tk.Tk):
 
         threading.Thread(target=task, daemon=True).start()
 
+    def clear_log_force(self):
+        self.log_txt.config(state="normal")
+        self.log_txt.delete("1.0", "end")
+        self.log_txt.config(state="disabled")
+
     def start_run(self):
         if messagebox.askyesno("Run update",
-                               "Clean the website files and update the State Rx report?\n\n"
+                               "Clean the Website files and update the report?\n\n"
                                "A backup of the report is saved first."):
             self._start(run_update, "Run")
 
@@ -669,20 +755,28 @@ class App(tk.Tk):
         self._start(run_qc, "QC")
 
     def _finish(self, title, errors):
+        took = time.time() - self.t0 if self.t0 else 0
         self.busy = False
         self.run_btn.set_enabled(True)
         self.qc_btn.set_enabled(True)
+        self.timer_lbl.config(text=f"⏱ {fmt_clock(took)}", fg=C["text"])
+
+        line = f"{title} took {fmt_took(took)}"
+        self.log_lines.append(line)
+        self._write(line, "time")
+
         try:
             name = "update_log.txt" if title == "Run" else "qc_log.txt"
             with open(os.path.join(base_folder(), name), "w", encoding="utf-8") as f:
                 f.write("\n".join(self.log_lines))
         except Exception:
             pass
+
         if errors:
-            self.status_lbl.config(text=f"{title} finished with {len(errors)} problem(s)", fg=C["bad"])
+            self.status_lbl.config(text=f"{title} · {len(errors)} problem(s) · {fmt_took(took)}", fg=C["bad"])
             messagebox.showwarning(f"{title} finished", "\n".join(errors[:10]))
         else:
-            self.status_lbl.config(text=f"{title} finished · all good", fg=C["ok"])
+            self.status_lbl.config(text=f"{title} done · all good · {fmt_took(took)}", fg=C["ok"])
 
 
 if __name__ == "__main__":
