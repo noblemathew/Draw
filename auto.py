@@ -1,7 +1,7 @@
 LOG_LINES = []
 
-SAVE_website_CHANGES = True     
-XL_TO_LEFT = -4159           
+SAVE_website_CHANGES = True      
+XL_TO_LEFT = -4159            
 
 
 def log(msg=""):
@@ -29,7 +29,7 @@ def is_blank(v):
 def find_file(folder, name):
     matches = []
     for f in os.listdir(folder):
-        if f.startswith("~$"):          # Excel temp/lock files
+        if f.startswith("~$"):          
             continue
         stem, ext = os.path.splitext(f)
         if ext.lower() in EXCEL_EXTS and stem.lower().startswith(name.lower()):
@@ -78,7 +78,7 @@ def fill_missing_labels(ws, job):
     labels = cfg["labels"]
     n = len(labels)
 
-    def val(r, c):                                        
+    def val(r, c):                                        # r, c are 0-based
         if r >= len(rows) or c >= len(rows[r]):
             return None
         return rows[r][c]
@@ -105,34 +105,40 @@ def fill_missing_labels(ws, job):
 def clean_website_sheet(ws, job):
     start = job.get("align_from_row", 1)
 
-    # Unmerge everything so cells can move freely
     ws.Cells.UnMerge()
 
-    # 1. Remove blank rows (from start row to the end)
     if job.get("remove_blank_rows", True):
         rows, last_row, _ = read_values(ws)
         removed = 0
-        for r in range(last_row, start - 1, -1):          # bottom-up so row numbers don't move
+        for r in range(last_row, start - 1, -1):          
             if all(is_blank(x) for x in rows[r - 1]):
                 ws.Rows(r).Delete()
                 removed += 1
         log(f"  Blank rows removed: {removed}")
 
-    # 1b. Fill missing labels (only if this job has "fill_labels")
     fill_missing_labels(ws, job)
 
-    # 2. Every row from start row: remove the empty cells before the data -> data starts in A
     rows, last_row, _ = read_values(ws)
+
+    cfg = job.get("fill_labels")
+    if cfg:
+        chk = col_num(cfg["check_col"]) - 1
+        key_c = col_num(cfg["key_col"]) - 1
+        key = str(cfg["key"]).strip().upper()
+
     moved = 0
     for r in range(start, last_row + 1):
         v = rows[r - 1]
         first = next((k for k, x in enumerate(v) if not is_blank(x)), None)
+        if (cfg and first is not None and key_c < len(v)
+                and is_blank(v[chk]) and not is_blank(v[key_c])
+                and str(v[key_c]).strip().upper() == key):
+            first = min(first, chk)                       # stop at D, keep it as the blank A cell
         if first:                                         # None = empty row, 0 = already in A
             ws.Range(ws.Cells(r, 1), ws.Cells(r, first)).Delete(XL_TO_LEFT)
             moved += 1
     log(f"  Rows moved to start at column A: {moved}")
 
-    # 3. Remove columns that are fully empty (from start row to the end)
     if job.get("remove_blank_columns", True):
         rows, last_row, last_col = read_values(ws)
         removed = 0
@@ -142,6 +148,7 @@ def clean_website_sheet(ws, job):
                     ws.Range(ws.Cells(start, c), ws.Cells(last_row, c)).Delete(XL_TO_LEFT)
                     removed += 1
         log(f"  Blank columns removed: {removed}")
+
 
 
 def get_copy_data(ws, job):
@@ -160,6 +167,7 @@ def get_copy_data(ws, job):
 
 
 
+
 def paste(report_wb, job, data, ncols):
     ws = report_wb.Worksheets(job["target_sheet"])
     tgt = ws.Range(job["target_cell"])
@@ -173,6 +181,8 @@ def paste(report_wb, job, data, ncols):
 
     if data:
         ws.Range(ws.Cells(r0, c0), ws.Cells(r0 + len(data) - 1, c0 + ncols - 1)).Value = tuple(data)
+
+
 
 
 def main():
