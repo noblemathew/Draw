@@ -1,0 +1,32 @@
+        self.report_lbl = tk.Label(info, text="", bg=C["panel"], fg=C["text"], font=(FONT, 9, "bold"), anchor="w")
+        self.report_lbl.grid(row=0, column=1, sticky="w", pady=(8, 2))
+
+
+        rrow = tk.Frame(info, bg=C["panel"])
+        rrow.grid(row=0, column=1, sticky="w", pady=(8, 2))
+        self.report_var = tk.StringVar(value=MAIN_REPORT_NAME)
+        entry = tk.Entry(rrow, textvariable=self.report_var, width=30, font=(FONT, 9, "bold"),
+                         bg=C["panel"], fg=C["text"], relief="flat", highlightthickness=1,
+                         highlightbackground=C["border"], highlightcolor=C["accent"])
+        entry.pack(side="left", ipady=3)
+        entry.bind("<Return>", lambda e: self.refresh())
+        entry.bind("<FocusOut>", lambda e: self.refresh())
+        self.report_lbl = tk.Label(rrow, text="", bg=C["panel"], font=(FONT, 8))
+        self.report_lbl.pack(side="left", padx=(8, 0))
+
+
+
+        rp = find_main_report()
+        if rp:
+            self.report_lbl.config(text=os.path.basename(rp), fg=C["text"])
+        else:
+            self.report_lbl.config(text=f"'{MAIN_REPORT_NAME}' not found next to the app", fg=C["bad"])
+
+
+        global MAIN_REPORT_NAME
+        MAIN_REPORT_NAME = self.report_var.get().strip() or MAIN_REPORT_NAME
+        rp = find_main_report()
+        if rp:
+            self.report_lbl.config(text=f"✓ {os.path.basename(rp)}", fg=C["ok"])
+        else:
+            self.report_lbl.config(text="✗ not found", fg=C["bad"])
