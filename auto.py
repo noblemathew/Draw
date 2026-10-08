@@ -1,7 +1,7 @@
 LOG_LINES = []
 
-SAVE_WEBI_CHANGES = True      # True = the cleaned data is saved back into the webi file
-XL_TO_LEFT = -4159            # Excel constant: shift cells left
+SAVE_website_CHANGES = True     
+XL_TO_LEFT = -4159           
 
 
 def log(msg=""):
@@ -10,14 +10,12 @@ def log(msg=""):
 
 
 def base_folder():
-    """Folder of the .exe (or the .py when run directly)."""
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
 
 def col_num(letter):
-    """'A' -> 1, 'H' -> 8, 'AA' -> 27"""
     n = 0
     for ch in letter.upper().strip():
         n = n * 26 + (ord(ch) - 64)
@@ -67,11 +65,44 @@ def read_values(ws):
     return [list(r) for r in data], last_row, last_col
 
 
-# =====================================================================
-# STEP 1: FIX THE WEBI FILE ITSELF
-# =====================================================================
 
-def clean_webi_sheet(ws, job):
+def fill_missing_labels(ws, job):
+    cfg = job.get("fill_labels")
+    if not cfg:
+        return
+
+    rows, _, _ = read_values(ws)
+    chk = col_num(cfg["check_col"]) - 1
+    key_c = col_num(cfg["key_col"]) - 1
+    key = str(cfg["key"]).strip().upper()
+    labels = cfg["labels"]
+    n = len(labels)
+
+    def val(r, c):                                        
+        if r >= len(rows) or c >= len(rows[r]):
+            return None
+        return rows[r][c]
+
+    filled = 0
+    for r in range(len(rows)):
+        k = val(r, key_c)
+        if is_blank(k) or str(k).strip().upper() != key:
+            continue
+        if not is_blank(val(r, chk)):
+            continue
+        if r + n >= len(rows):                            # not enough rows below
+            continue
+        if all(is_blank(val(r + 1 + i, chk)) for i in range(n)):
+            for i, label in enumerate(labels):
+                excel_row = r + 2 + i                     # 0-based -> Excel row below
+                ws.Range(ws.Cells(excel_row, chk + 1), ws.Cells(excel_row, chk + 1)).Value = label
+                rows[r + 1 + i][chk] = label
+            filled += 1
+    log(f"  '{cfg['key']}' label sets filled: {filled}")
+
+
+
+def clean_website_sheet(ws, job):
     start = job.get("align_from_row", 1)
 
     # Unmerge everything so cells can move freely
@@ -86,6 +117,9 @@ def clean_webi_sheet(ws, job):
                 ws.Rows(r).Delete()
                 removed += 1
         log(f"  Blank rows removed: {removed}")
+
+    # 1b. Fill missing labels (only if this job has "fill_labels")
+    fill_missing_labels(ws, job)
 
     # 2. Every row from start row: remove the empty cells before the data -> data starts in A
     rows, last_row, _ = read_values(ws)
@@ -110,10 +144,6 @@ def clean_webi_sheet(ws, job):
         log(f"  Blank columns removed: {removed}")
 
 
-# =====================================================================
-# STEP 2: COPY FROM THE CLEANED WEBI SHEET
-# =====================================================================
-
 def get_copy_data(ws, job):
     rows, _, _ = read_values(ws)
     cp = job["copy"]
@@ -129,9 +159,6 @@ def get_copy_data(ws, job):
     return out, (b - a + 1)
 
 
-# =====================================================================
-# STEP 3: PASTE INTO MAIN REPORT (values only)
-# =====================================================================
 
 def paste(report_wb, job, data, ncols):
     ws = report_wb.Worksheets(job["target_sheet"])
@@ -147,10 +174,6 @@ def paste(report_wb, job, data, ncols):
     if data:
         ws.Range(ws.Cells(r0, c0), ws.Cells(r0 + len(data) - 1, c0 + ncols - 1)).Value = tuple(data)
 
-
-# =====================================================================
-# MAIN
-# =====================================================================
 
 def main():
     folder = base_folder()
@@ -179,20 +202,20 @@ def main():
             log("")
             log(f"--- {job['name']} ---")
             try:
-                webi_path = find_file(folder, job["webi_file"])
-                log(f"Webi file: {os.path.basename(webi_path)}")
+                website_path = find_file(folder, job["website_file"])
+                log(f"website file: {os.path.basename(website_path)}")
 
-                wb = excel.Workbooks.Open(webi_path, 0, False)
+                wb = excel.Workbooks.Open(website_path, 0, False)
                 try:
-                    if SAVE_WEBI_CHANGES and wb.ReadOnly:
-                        raise RuntimeError("Webi file is open somewhere else. Close it and run again.")
+                    if SAVE_website_CHANGES and wb.ReadOnly:
+                        raise RuntimeError("website file is open somewhere else. Close it and run again.")
 
-                    ws = wb.Worksheets(job["webi_sheet"]) if job.get("webi_sheet") else wb.Worksheets(1)
+                    ws = wb.Worksheets(job["website_sheet"]) if job.get("website_sheet") else wb.Worksheets(1)
 
-                    clean_webi_sheet(ws, job)
-                    if SAVE_WEBI_CHANGES:
+                    clean_website_sheet(ws, job)
+                    if SAVE_website_CHANGES:
                         wb.Save()
-                        log("  Webi file cleaned and saved")
+                        log("  website file cleaned and saved")
 
                     data, ncols = get_copy_data(ws, job)
                 finally:
