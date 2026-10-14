@@ -1,24 +1,3 @@
-import os
-import sys
-import time
-import shutil
-import queue
-import threading
-import traceback
-from datetime import datetime
-import tkinter as tk
-from tkinter import ttk, messagebox
-import pythoncom
-import win32com.client as win32
-
-MAIN_REPORT_NAME = ""
-website_FOLDER_NAME = "website"
-MATCH_CHARS = 10
-LOGO_FILE = "logo.png"
-EXCEL_EXTS = (".xlsx", ".xlsm", ".xls", ".xlsb")
-MAKE_BACKUP = True
-SAVE_website_CHANGES = True
-
 XL_TO_LEFT = -4159
 
 
@@ -504,8 +483,15 @@ C = {
     "ok": "#039855",
     "bad": "#D92D20",
     "busy": "#DC8B00",
+    "win_hover": "#F2F4F7",
+    "close_hover": "#E81123",
 }
 FONT = "Segoe UI"
+UI_SCALE = 1.0
+
+
+def px(n):
+    return int(round(n * UI_SCALE))
 
 
 def fmt_clock(sec):
@@ -524,21 +510,39 @@ def round_rect(c, x1, y1, x2, y2, r, **kw):
     return c.create_polygon(pts, smooth=True, **kw)
 
 
+def load_logo(w, h):
+    path = logo_path()
+    if not os.path.exists(path):
+        return None
+    try:
+        from PIL import Image, ImageTk
+        img = Image.open(path).convert("RGBA")
+        ratio = min(w / img.width, h / img.height)
+        img = img.resize((max(1, int(img.width * ratio)), max(1, int(img.height * ratio))), Image.LANCZOS)
+        return ImageTk.PhotoImage(img)
+    except Exception:
+        try:
+            return tk.PhotoImage(file=path)
+        except Exception:
+            return None
+
+
 class Button(tk.Canvas):
 
     def __init__(self, parent, text, command, style="primary", width=92, height=34):
-        super().__init__(parent, width=width, height=height, bg=parent["bg"],
+        w, h = px(width), px(height)
+        super().__init__(parent, width=w, height=h, bg=parent["bg"],
                          highlightthickness=0, bd=0, cursor="hand2")
-        self.cmd, self.enabled, self.style_name = command, True, style
+        self.cmd, self.enabled = command, True
         s = {
             "primary": (C["blue"], C["blue_hover"], "#FFFFFF", ""),
             "accent": (C["yellow"], C["yellow_hover"], C["text"], ""),
             "outline": ("#FFFFFF", C["red_soft"], C["red"], C["field"]),
         }[style]
         self.fill, self.hover, self.fg, self.border = s
-        self.shape = round_rect(self, 1, 1, width - 1, height - 1, 6,
+        self.shape = round_rect(self, 1, 1, w - 1, h - 1, px(6),
                                 fill=self.fill, outline=self.border or self.fill)
-        self.label = self.create_text(width / 2, height / 2, text=text, fill=self.fg, font=(FONT, 9, "bold"))
+        self.label = self.create_text(w / 2, h / 2, text=text, fill=self.fg, font=(FONT, 9, "bold"))
         self.bind("<Enter>", lambda e: self.enabled and self.itemconfig(self.shape, fill=self.hover))
         self.bind("<Leave>", lambda e: self.enabled and self.itemconfig(self.shape, fill=self.fill))
         self.bind("<Button-1>", lambda e: self.enabled and self.cmd())
@@ -551,13 +555,39 @@ class Button(tk.Canvas):
         self.config(cursor="hand2" if on else "arrow")
 
 
+class WinButton(tk.Canvas):
+
+    def __init__(self, parent, kind, command):
+        w, h = px(44), px(30)
+        super().__init__(parent, width=w, height=h, bg=C["bg"], highlightthickness=0, bd=0)
+        self.kind = kind
+        cx, cy, d = w / 2, h / 2, px(5)
+        lw = max(1, px(1))
+        if kind == "min":
+            self.items = [self.create_line(cx - d, cy, cx + d, cy, fill=C["sub"], width=lw)]
+            self.hover_bg, self.hover_fg = C["win_hover"], C["text"]
+        else:
+            self.items = [self.create_line(cx - d, cy - d, cx + d, cy + d, fill=C["sub"], width=lw),
+                          self.create_line(cx - d, cy + d, cx + d, cy - d, fill=C["sub"], width=lw)]
+            self.hover_bg, self.hover_fg = C["close_hover"], "#FFFFFF"
+        self.bind("<Enter>", lambda e: self._paint(self.hover_bg, self.hover_fg))
+        self.bind("<Leave>", lambda e: self._paint(C["bg"], C["sub"]))
+        self.bind("<ButtonRelease-1>", lambda e: command())
+
+    def _paint(self, bg, fg):
+        self.config(bg=bg)
+        for i in self.items:
+            self.itemconfig(i, fill=fg)
+
+
 class ThinBar(tk.Canvas):
 
     def __init__(self, parent, width, height=4):
-        super().__init__(parent, width=width, height=height, bg=parent["bg"], highlightthickness=0, bd=0)
-        self.w, self.h, self.maximum = width, height, 1
-        round_rect(self, 0, 0, width, height, 2, fill=C["track"], outline="")
-        self.bar = round_rect(self, 0, 0, 0, height, 2, fill=C["blue"], outline="")
+        super().__init__(parent, width=width, height=px(height), bg=parent["bg"], highlightthickness=0, bd=0)
+        self.w, self.h, self.maximum = width, px(height), 1
+        r = self.h / 2
+        round_rect(self, 0, 0, width, self.h, r, fill=C["track"], outline="")
+        self.bar = round_rect(self, 0, 0, 0, self.h, r, fill=C["blue"], outline="")
 
     def set(self, value, maximum=None):
         if maximum:
@@ -567,7 +597,8 @@ class ThinBar(tk.Canvas):
         self.itemconfig(self.bar, state="normal" if x > 0 else "hidden")
 
     def _pts(self, x2):
-        r, h = 2, self.h
+        h = self.h
+        r = h / 2
         x2 = max(x2, 2 * r)
         return [r, 0, x2 - r, 0, x2, 0, x2, r, x2, h - r, x2, h, x2 - r, h, r, h, 0, h, 0, h - r, 0, r, 0, 0]
 
@@ -586,13 +617,19 @@ class App(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("Excel Report Updater")
-        self.configure(bg=C["bg"])
-        self.resizable(False, False)
-        x = (self.winfo_screenwidth() - self.W) // 2
-        y = (self.winfo_screenheight() - self.H) // 3
-        self.geometry(f"{self.W}x{self.H}+{x}+{y}")
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        global UI_SCALE
+        try:
+            UI_SCALE = max(1.0, self.winfo_fpixels("1i") / 96.0)
+        except Exception:
+            UI_SCALE = 1.0
+
+        self.title("Excel report Updater")
+        self.configure(bg=C["line"])
+        self.overrideredirect(True)
+        w, h = px(self.W), px(self.H)
+        x = (self.winfo_screenwidth() - w) // 2
+        y = (self.winfo_screenheight() - h) // 3
+        self.geometry(f"{w}x{h}+{x}+{y}")
 
         self.q = queue.Queue()
         self.busy = False
@@ -600,76 +637,121 @@ class App(tk.Tk):
         self.log_lines = []
         self.t0 = None
         self.mode = ""
+        self._minimized = False
+        self._dx = self._dy = 0
 
         self._build()
         self.refresh()
+        self.bind("<Map>", self._on_map)
+        self.after(10, self._show_in_taskbar)
         self.after(100, self._poll)
-        self.after(50, self._no_maximize)
 
-    def _no_maximize(self):
+    def _hwnd(self):
+        import ctypes
+        return ctypes.windll.user32.GetParent(self.winfo_id())
+
+    def _show_in_taskbar(self):
         try:
             import ctypes
             user32 = ctypes.windll.user32
-            hwnd = user32.GetParent(self.winfo_id())
-            style = user32.GetWindowLongW(hwnd, -16)
-            user32.SetWindowLongW(hwnd, -16, style & ~0x00010000)
-            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0020)
+            hwnd = self._hwnd()
+            ex = user32.GetWindowLongW(hwnd, -20)
+            ex = (ex & ~0x00000080) | 0x00040000
+            user32.SetWindowLongW(hwnd, -20, ex)
+            self.withdraw()
+            self.after(10, self.deiconify)
         except Exception:
             pass
 
+    def minimize(self):
+        self._minimized = True
+        self.overrideredirect(False)
+        self.iconify()
+
+    def _on_map(self, event=None):
+        if self._minimized and self.state() == "normal":
+            self._minimized = False
+            self.overrideredirect(True)
+            self.after(10, self._show_in_taskbar)
+
+    def _drag_start(self, e):
+        self._dx, self._dy = e.x_root - self.winfo_x(), e.y_root - self.winfo_y()
+
+    def _drag(self, e):
+        self.geometry(f"+{e.x_root - self._dx}+{e.y_root - self._dy}")
+
+    def _draggable(self, *widgets):
+        for w in widgets:
+            w.bind("<ButtonPress-1>", self._drag_start)
+            w.bind("<B1-Motion>", self._drag)
+
     def on_close(self):
         if self.busy:
-            messagebox.showinfo("Still working", "Please press Stop and wait until it finishes.")
+            messagebox.showinfo("Still working", "Please press Stop and wait until it finishes.", parent=self)
             return
         self.destroy()
 
     def _build(self):
-        strip = tk.Canvas(self, width=self.W, height=3, bg=C["blue"], highlightthickness=0, bd=0)
+        main = tk.Frame(self, bg=C["bg"])
+        main.pack(fill="both", expand=True, padx=1, pady=1)
+        W = px(self.W) - 2
+        P = px(self.PAD)
+
+        strip = tk.Canvas(main, width=W, height=px(3), bg=C["blue"], highlightthickness=0, bd=0)
         strip.pack(fill="x")
-        strip.create_rectangle(self.W - 120, 0, self.W, 3, fill=C["yellow"], outline="")
+        strip.create_rectangle(W - px(120), 0, W, px(3), fill=C["yellow"], outline="")
 
-        logo_box = tk.Frame(self, bg=C["bg"], width=267, height=148)
-        logo_box.pack(pady=(6, 0))
+        head = tk.Frame(main, bg=C["bg"])
+        head.pack(fill="x")
+        lw, lh = px(267), px(148)
+        logo_box = tk.Frame(head, bg=C["bg"], width=lw, height=lh)
+        logo_box.pack(pady=(px(6), 0))
         logo_box.pack_propagate(False)
-        self.logo_img = None
-        path = logo_path()
-        if os.path.exists(path):
-            try:
-                self.logo_img = tk.PhotoImage(file=path)
-                tk.Label(logo_box, image=self.logo_img, bg=C["bg"], bd=0).pack(expand=True)
-            except Exception:
-                self.logo_img = None
-        if self.logo_img is None:
-            cv = tk.Canvas(logo_box, width=267, height=148, bg=C["bg"], highlightthickness=0)
+        self.logo_img = load_logo(lw, lh)
+        drag_items = [strip, head, logo_box]
+        if self.logo_img is not None:
+            lbl = tk.Label(logo_box, image=self.logo_img, bg=C["bg"], bd=0)
+            lbl.pack(expand=True)
+            drag_items.append(lbl)
+        else:
+            cv = tk.Canvas(logo_box, width=lw, height=lh, bg=C["bg"], highlightthickness=0)
             cv.pack()
-            cv.create_rectangle(1, 1, 266, 147, outline=C["line"], dash=(4, 3))
-            cv.create_text(133, 66, text="LOGO", fill=C["muted"], font=(FONT, 14, "bold"))
-            cv.create_text(133, 88, text=f"{LOGO_FILE}  ·  267 × 148", fill=C["muted"], font=(FONT, 8))
+            cv.create_rectangle(1, 1, lw - 1, lh - 1, outline=C["line"], dash=(4, 3))
+            cv.create_text(lw / 2, lh * 0.45, text="LOGO", fill=C["muted"], font=(FONT, 14, "bold"))
+            cv.create_text(lw / 2, lh * 0.6, text=f"{LOGO_FILE}  ·  267 × 148", fill=C["muted"], font=(FONT, 8))
+            drag_items.append(cv)
 
-        tk.Label(self, text="Excel Report Updater", bg=C["bg"], fg=C["text"],
-                 font=(FONT, 13, "bold")).pack(pady=(4, 0))
+        name = tk.Label(head, text="Excel report Updater", bg=C["bg"], fg=C["text"], font=(FONT, 13, "bold"))
+        name.pack(pady=(px(4), 0))
+        drag_items.append(name)
+        self._draggable(*drag_items)
 
-        footer = tk.Frame(self, bg=C["footer"], height=56)
+        controls = tk.Frame(main, bg=C["bg"])
+        controls.place(relx=1.0, x=0, y=px(3), anchor="ne")
+        WinButton(controls, "min", self.minimize).pack(side="left")
+        WinButton(controls, "close", self.on_close).pack(side="left")
+
+        footer = tk.Frame(main, bg=C["footer"], height=px(56))
         footer.pack(side="bottom", fill="x")
         footer.pack_propagate(False)
         tk.Frame(footer, bg=C["line"], height=1).pack(side="top", fill="x")
         fin = tk.Frame(footer, bg=C["footer"])
-        fin.pack(fill="both", expand=True, padx=self.PAD)
+        fin.pack(fill="both", expand=True, padx=P)
         LinkLabel(fin, "View log", self.open_log).pack(side="left")
-        tk.Label(fin, text="|", bg=C["footer"], fg=C["line"], font=(FONT, 9)).pack(side="left", padx=8)
+        tk.Label(fin, text="|", bg=C["footer"], fg=C["line"], font=(FONT, 9)).pack(side="left", padx=px(8))
         LinkLabel(fin, "Open folder", self.open_folder).pack(side="left")
 
         self.run_btn = Button(fin, "Run", self.start_run, "primary", width=96)
         self.run_btn.pack(side="right")
         self.qc_btn = Button(fin, "QC Check", self.start_qc, "accent", width=96)
-        self.qc_btn.pack(side="right", padx=(0, 8))
+        self.qc_btn.pack(side="right", padx=(0, px(8)))
         self.stop_btn = Button(fin, "Stop", self.stop, "outline", width=76)
-        self.stop_btn.pack(side="right", padx=(0, 8))
+        self.stop_btn.pack(side="right", padx=(0, px(8)))
         self.stop_btn.set_enabled(False)
 
-        tk.Frame(self, bg=C["line"], height=1).pack(fill="x", padx=self.PAD, pady=(6, 0))
-        body = tk.Frame(self, bg=C["bg"])
-        body.pack(fill="both", expand=True, padx=self.PAD, pady=(10, 0))
+        tk.Frame(main, bg=C["line"], height=1).pack(fill="x", padx=P, pady=(px(6), 0))
+        body = tk.Frame(main, bg=C["bg"])
+        body.pack(fill="both", expand=True, padx=P, pady=(px(10), 0))
 
         r1 = tk.Frame(body, bg=C["bg"])
         r1.pack(fill="x")
@@ -680,27 +762,30 @@ class App(tk.Tk):
                               bg="#FFFFFF", fg=C["text"], relief="flat", insertbackground=C["text"],
                               highlightthickness=1, highlightbackground=C["field"], highlightcolor=C["blue"],
                               disabledbackground=C["footer"], disabledforeground=C["muted"])
-        self.entry.pack(side="left", fill="x", expand=True, ipady=4, padx=(0, 12))
+        self.entry.pack(side="left", fill="x", expand=True, ipady=px(4), padx=(0, px(12)))
         self.entry.bind("<Return>", lambda e: (self.focus_set(), self.refresh()))
         self.entry.bind("<FocusOut>", lambda e: self.refresh())
         self.report_ok = tk.Label(r1, text="", bg=C["bg"], font=(FONT, 9), width=10, anchor="w")
         self.report_ok.pack(side="left")
 
         r2 = tk.Frame(body, bg=C["bg"])
-        r2.pack(fill="x", pady=(10, 0))
-        self.dot = tk.Canvas(r2, width=8, height=8, bg=C["bg"], highlightthickness=0)
-        self.dot_id = self.dot.create_oval(0, 0, 8, 8, fill=C["ok"], outline="")
-        self.dot.pack(side="left", pady=(2, 0))
+        r2.pack(fill="x", pady=(px(10), 0))
+        d = px(8)
+        self.dot = tk.Canvas(r2, width=d, height=d, bg=C["bg"], highlightthickness=0)
+        self.dot_id = self.dot.create_oval(0, 0, d, d, fill=C["ok"], outline="")
+        self.dot.pack(side="left", pady=(px(2), 0))
         self.status_lbl = tk.Label(r2, text="", bg=C["bg"], fg=C["text"], font=(FONT, 10, "bold"))
-        self.status_lbl.pack(side="left", padx=(8, 0))
+        self.status_lbl.pack(side="left", padx=(px(8), 0))
         self.timer_lbl = tk.Label(r2, text="00:00", bg=C["bg"], fg=C["sub"], font=(FONT, 10))
         self.timer_lbl.pack(side="right")
-        tk.Label(r2, text="Elapsed", bg=C["bg"], fg=C["muted"], font=(FONT, 8)).pack(side="right", padx=(0, 6))
+        tk.Label(r2, text="Elapsed", bg=C["bg"], fg=C["muted"], font=(FONT, 8)).pack(side="right", padx=(0, px(6)))
 
-        self.pbar = ThinBar(body, width=self.W - 2 * self.PAD)
-        self.pbar.pack(fill="x", pady=(8, 0))
+        self.pbar = ThinBar(body, width=W - 2 * P)
+        self.pbar.pack(fill="x", pady=(px(8), 0))
         self.step_lbl = tk.Label(body, text="", bg=C["bg"], fg=C["sub"], font=(FONT, 9), anchor="w")
-        self.step_lbl.pack(fill="x", pady=(6, 0))
+        self.step_lbl.pack(fill="x", pady=(px(6), 0))
+
+        controls.lift()
 
     def set_status(self, text, color):
         self.status_lbl.config(text=text)
@@ -746,7 +831,7 @@ class App(tk.Tk):
         paths = [os.path.join(base_folder(), n) for n in names]
         paths = [p for p in paths if os.path.exists(p)]
         if not paths:
-            messagebox.showinfo("No log yet", "Run or QC first.")
+            messagebox.showinfo("No log yet", "Run or QC first.", parent=self)
             return
         try:
             os.startfile(max(paths, key=os.path.getmtime))
@@ -789,7 +874,8 @@ class App(tk.Tk):
         self.refresh()
         if not find_main_report():
             messagebox.showerror("Report not found",
-                                 f"No file starting with '{MAIN_REPORT_NAME}' was found next to the app.")
+                                 f"No file starting with '{MAIN_REPORT_NAME}' was found next to the app.",
+                                 parent=self)
             return
 
         self.mode = title
@@ -817,7 +903,7 @@ class App(tk.Tk):
         threading.Thread(target=task, daemon=True).start()
 
     def start_run(self):
-        if messagebox.askyesno("Run", "Update the report now?\n\nA backup copy is saved first."):
+        if messagebox.askyesno("Run", "Update the report now?\n\nA backup copy is saved first.", parent=self):
             self._start(run_update, "Run")
 
     def start_qc(self):
@@ -852,7 +938,7 @@ class App(tk.Tk):
         elif errors:
             self.set_status(f"{title} completed with {len(errors)} issue(s)", C["bad"])
             self.step_lbl.config(text=f"Took {fmt_took(took)}  ·  click View log for details")
-            messagebox.showwarning(f"{title} completed", "\n".join(errors[:10]))
+            messagebox.showwarning(f"{title} completed", "\n".join(errors[:10]), parent=self)
         else:
             done = "Report updated successfully" if title == "Run" else "QC passed  ·  all data matches"
             self.set_status(done, C["ok"])
@@ -861,4 +947,12 @@ class App(tk.Tk):
 
 
 if __name__ == "__main__":
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
     App().mainloop()
