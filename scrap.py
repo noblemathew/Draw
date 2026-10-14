@@ -18,6 +18,7 @@ LOGO_FILE = "logo.png"
 EXCEL_EXTS = (".xlsx", ".xlsm", ".xls", ".xlsb")
 MAKE_BACKUP = True
 SAVE_website_CHANGES = True
+
 XL_TO_LEFT = -4159
 
 
@@ -25,6 +26,13 @@ def base_folder():
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
+
+
+def logo_path():
+    p = os.path.join(base_folder(), LOGO_FILE)
+    if os.path.exists(p):
+        return p
+    return os.path.join(getattr(sys, "_MEIPASS", base_folder()), LOGO_FILE)
 
 
 def website_folder():
@@ -624,7 +632,7 @@ class App(tk.Tk):
         logo_box.pack(pady=(6, 0))
         logo_box.pack_propagate(False)
         self.logo_img = None
-        path = os.path.join(base_folder(), LOGO_FILE)
+        path = logo_path()
         if os.path.exists(path):
             try:
                 self.logo_img = tk.PhotoImage(file=path)
