@@ -1,849 +1,856 @@
+import os
 import sys
 import time
-import datetime
-import decimal
-from contextlib import contextmanager
-
-import pyodbc
-from PySide6.QtCore import Qt, Signal, QPointF, QRectF, QPoint
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QIcon, QFont, QBrush
-from PySide6.QtWidgets import (
-    QApplication, QWidget, QMainWindow, QStackedWidget, QFrame, QLabel, QLineEdit,
-    QPushButton, QComboBox, QVBoxLayout, QHBoxLayout, QGridLayout, QListWidget,
-    QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QAbstractItemView, QSizePolicy,
-)
-
-
-APP_TITLE = "My App"
-
-USER_COLUMN = "UserName"      
-CLASS_COLUMN = "Class"     
-FLAG_COLUMN = "FlagColor"     
-
-USER_LABEL, USER_PLACEHOLDER = "User", "Search users..."
-CLASS_LABEL, CLASS_PLACEHOLDER = "Select Option for Class", "Search classes..."
-FLAG_LABEL, FLAG_PLACEHOLDER = "Selection for Flag Color", "Search flag colors..."
-
-RESULT_COLUMNS = [
-    ("UserName", "User"),             
-    ("Class", "Class"),               
-    ("FlagColor", "Flag Color"),      
-    ("Description", "Description"),   
-    ("CreatedOn", "Created On"),      
-]
-
-MAX_RESULT_ROWS = 5000                
-DATE_FORMAT = "%d-%m-%Y %H:%M"        
-
-
-def pick_driver():
-    preferred = [
-        "ODBC Driver 18 for SQL Server",
-        "ODBC Driver 17 for SQL Server",
-        "ODBC Driver 13 for SQL Server",
-        "SQL Server Native Client 11.0",
-        "SQL Server",
-    ]
-    installed = pyodbc.drivers()
-    for d in preferred:
-        if d in installed:
-            return d
-    raise RuntimeError(
-        "No SQL Server ODBC driver found.\n"
-        "Install 'ODBC Driver 18 for SQL Server' from Microsoft and try again."
-    )
-
-
-def db_connect(server, database="master"):
-    driver = pick_driver()
-    db = database.replace("}", "}}")
-    cs = (
-        f"DRIVER={{{driver}}};SERVER={server};DATABASE={{{db}}};"
-        "Trusted_Connection=yes;"
-    )
-    if driver.startswith("ODBC Driver"):
-        cs += "TrustServerCertificate=yes;"
-    return pyodbc.connect(cs, timeout=10)
-
-
-def q(name):
-    return "[" + str(name).replace("]", "]]") + "]"
-
-
-def fmt_value(v):
-    if v is None:
-        return ""
-    if isinstance(v, datetime.datetime):
-        return v.strftime(DATE_FORMAT)
-    if isinstance(v, datetime.date):
-        return v.strftime(DATE_FORMAT.split(" ")[0])
-    if isinstance(v, decimal.Decimal):
-        return format(v.normalize(), "f")
-    return str(v)
-
-
-@contextmanager
-def busy():
-    QApplication.setOverrideCursor(Qt.WaitCursor)
-    try:
-        yield
-    finally:
-        QApplication.restoreOverrideCursor()
-
-
-def make_icon(kind, color="#4b5468", size=18):
-    pm = QPixmap(size, size)
-    pm.fill(Qt.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing)
-    s = size
-    pen = QPen(QColor(color))
-    pen.setWidthF(max(1.6, s / 10))
-    pen.setCapStyle(Qt.RoundCap)
-    pen.setJoinStyle(Qt.RoundJoin)
-    p.setPen(pen)
-
-    if kind == "search":
-        p.drawEllipse(QRectF(s * 0.12, s * 0.12, s * 0.56, s * 0.56))
-        p.drawLine(QPointF(s * 0.62, s * 0.62), QPointF(s * 0.88, s * 0.88))
-    elif kind == "chevron":
-        p.drawPolyline([QPointF(s * 0.25, s * 0.38), QPointF(s * 0.5, s * 0.63),
-                        QPointF(s * 0.75, s * 0.38)])
-    elif kind == "refresh":
-        p.drawArc(QRectF(s * 0.18, s * 0.18, s * 0.64, s * 0.64), 40 * 16, 280 * 16)
-        x, y = s * 0.745, s * 0.294
-        p.drawLine(QPointF(x, y), QPointF(x + s * 0.02, y - s * 0.2))
-        p.drawLine(QPointF(x, y), QPointF(x - s * 0.19, y - s * 0.04))
-    elif kind == "app":
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#1e63e9"))
-        p.drawRoundedRect(QRectF(0, 0, s, s), s * 0.22, s * 0.22)
-        pen2 = QPen(QColor("white"))
-        pen2.setWidthF(s / 7)
-        pen2.setCapStyle(Qt.RoundCap)
-        p.setPen(pen2)
-        p.drawLine(QPointF(s * 0.32, s * 0.68), QPointF(s * 0.68, s * 0.32))
-    p.end()
-    return pm
-
-
-def make_empty_illustration(size=150):
-    pm = QPixmap(size, size)
-    pm.fill(Qt.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing)
-    s = size
-    p.setPen(Qt.NoPen)
-    p.setBrush(QColor("#e9eef8"))
-    p.drawEllipse(QRectF(s * 0.05, s * 0.05, s * 0.8, s * 0.8))
-    p.setBrush(QColor("white"))
-    p.setPen(QPen(QColor("#8a94a8"), 2))
-    p.drawRoundedRect(QRectF(s * 0.27, s * 0.2, s * 0.36, s * 0.46), 4, 4)
-    p.setPen(QPen(QColor("#a3acbd"), 2.4))
-    for i in range(4):
-        y = s * (0.3 + i * 0.08)
-        p.drawLine(QPointF(s * 0.34, y), QPointF(s * 0.55, y))
-    p.setBrush(QColor("#e9eef8"))
-    p.setPen(QPen(QColor("#1c2b4a"), 4))
-    p.drawEllipse(QRectF(s * 0.5, s * 0.5, s * 0.2, s * 0.2))
-    pen = QPen(QColor("#1e63e9"), 5)
-    pen.setCapStyle(Qt.RoundCap)
-    p.setPen(pen)
-    p.drawLine(QPointF(s * 0.68, s * 0.68), QPointF(s * 0.78, s * 0.78))
-    p.end()
-    return pm
-
-
-class _Popup(QFrame):
-    closed = Signal()
-
-    def __init__(self, parent):
-        super().__init__(parent, Qt.Popup | Qt.FramelessWindowHint)
-        self.setObjectName("ddPopup")
-
-    def hideEvent(self, e):
-        super().hideEvent(e)
-        self.closed.emit()
-
-
-class MultiSelectDropdown(QFrame):
-    selectionChanged = Signal()
-
-    def __init__(self, placeholder, parent=None):
-        super().__init__(parent)
-        self.setObjectName("ddField")
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(46)
-        self.placeholder = placeholder
-        self.options = []         
-        self.selected = set()     
-        self._last_close = 0.0
-
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 0, 12, 0)
-        lay.setSpacing(10)
-        icon = QLabel()
-        icon.setPixmap(make_icon("search"))
-        self.text_lbl = QLabel()
-        self.text_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        chev = QLabel()
-        chev.setPixmap(make_icon("chevron", "#1c2b4a"))
-        lay.addWidget(icon)
-        lay.addWidget(self.text_lbl, 1)
-        lay.addWidget(chev)
-
-        # popup
-        self.popup = _Popup(self)
-        pl = QVBoxLayout(self.popup)
-        pl.setContentsMargins(6, 6, 6, 6)
-        pl.setSpacing(6)
-        self.search_edit = QLineEdit()
-        self.search_edit.setObjectName("ddSearch")
-        self.search_edit.setPlaceholderText("Type to filter...")
-        self.search_edit.addAction(QIcon(make_icon("search")), QLineEdit.LeadingPosition)
-        self.search_edit.textChanged.connect(self._apply_filter)
-        self.list = QListWidget()
-        self.list.setObjectName("ddList")
-        self.list.setSelectionMode(QAbstractItemView.NoSelection)
-        self.list.setFocusPolicy(Qt.NoFocus)
-        self.list.itemClicked.connect(self._toggle_item)
-        pl.addWidget(self.search_edit)
-        pl.addWidget(self.list)
-        self.popup.closed.connect(self._on_popup_closed)
-
-        self._update_text()
-
-    def set_options(self, values):
-        values = sorted(values, key=lambda v: str(v).lower())
-        self.options = values
-        valid = set(values)
-        old = set(self.selected)
-        self.selected &= valid
-        self._rebuild_list()
-        self._update_text()
-        return self.selected != old
-
-    def clear_selection(self):
-        self.selected.clear()
-        self._rebuild_list()
-        self._update_text()
-
-
-    def _rebuild_list(self):
-        self.list.clear()
-        for v in self.options:
-            item = QListWidgetItem(fmt_value(v))
-            item.setData(Qt.UserRole, v)
-            item.setFlags(Qt.ItemIsEnabled)  
-            self._paint_item(item, v in self.selected)
-            self.list.addItem(item)
-        self._apply_filter(self.search_edit.text())
-
-    def _paint_item(self, item, checked):
-        item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
-        item.setBackground(QBrush(QColor("#eaf1fe")) if checked else QBrush(Qt.transparent))
-
-    def _toggle_item(self, item):
-        v = item.data(Qt.UserRole)
-        if v in self.selected:
-            self.selected.discard(v)
-            self._paint_item(item, False)
-        else:
-            self.selected.add(v)
-            self._paint_item(item, True)
-        self._update_text()
-        self.selectionChanged.emit()
-
-    def _apply_filter(self, text):
-        t = text.strip().lower()
-        for i in range(self.list.count()):
-            it = self.list.item(i)
-            it.setHidden(bool(t) and t not in it.text().lower())
-
-    def _update_text(self):
-        if not self.selected:
-            text = self.placeholder
-            self.text_lbl.setProperty("placeholder", True)
-        else:
-            names = [fmt_value(v) for v in self.options if v in self.selected]
-            text = ", ".join(names)
-            self.text_lbl.setProperty("placeholder", False)
-        self.text_lbl.style().unpolish(self.text_lbl)
-        self.text_lbl.style().polish(self.text_lbl)
-        fm = self.text_lbl.fontMetrics()
-        w = max(40, self.text_lbl.width())
-        self.text_lbl.setText(fm.elidedText(text, Qt.ElideRight, w))
-        self.text_lbl.setToolTip(text if self.selected else "")
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        self._update_text()
-
-    def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            if time.monotonic() - self._last_close < 0.25:
-                return
-            self._open_popup()
-
-    def _open_popup(self):
-        self._set_open(True)
-        rows = min(max(self.list.count(), 1), 8)
-        self.popup.setFixedWidth(self.width())
-        self.popup.setFixedHeight(56 + rows * 40)
-        self.popup.move(self.mapToGlobal(QPoint(0, self.height() + 4)))
-        self.search_edit.clear()
-        self.popup.show()
-        self.search_edit.setFocus()
-
-    def _on_popup_closed(self):
-        self._last_close = time.monotonic()
-        self._set_open(False)
-
-    def _set_open(self, is_open):
-        self.setProperty("open", is_open)
-        self.style().unpolish(self)
-        self.style().polish(self)
-
-
-
-class LoginScreen(QWidget):
-    connected = Signal(object, str, str, str, str)  
-
-    def __init__(self):
-        super().__init__()
-        self.server_conn = None
-        self.loaded_server = None
-
-        outer = QVBoxLayout(self)
-        outer.setAlignment(Qt.AlignCenter)
-
-        card = QFrame()
-        card.setObjectName("card")
-        card.setFixedWidth(540)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(36, 32, 36, 32)
-        lay.setSpacing(8)
-
-        title = QLabel("Connect to SQL Server")
-        title.setObjectName("title")
-        sub = QLabel("Windows Authentication")
-        sub.setObjectName("subtitle")
-        lay.addWidget(title)
-        lay.addWidget(sub)
-        lay.addSpacing(16)
-
-        lay.addWidget(self._label("Server Name"))
-        row = QHBoxLayout()
-        row.setSpacing(10)
-        self.server_edit = QLineEdit()
-        self.server_edit.setPlaceholderText(r"e.g. localhost\SQLEXPRESS")
-        self.server_edit.editingFinished.connect(lambda: self.load_databases(force=False))
-        self.load_btn = QPushButton("  Load")
-        self.load_btn.setObjectName("secondary")
-        self.load_btn.setIcon(QIcon(make_icon("refresh", "#1c2b4a")))
-        self.load_btn.setCursor(Qt.PointingHandCursor)
-        self.load_btn.clicked.connect(lambda: self.load_databases(force=True))
-        row.addWidget(self.server_edit, 1)
-        row.addWidget(self.load_btn)
-        lay.addLayout(row)
-        lay.addSpacing(10)
-
-        lay.addWidget(self._label("Database"))
-        self.db_combo = QComboBox()
-        self.db_combo.setPlaceholderText("Select database")
-        self.db_combo.currentIndexChanged.connect(self.load_tables)
-        lay.addWidget(self.db_combo)
-        lay.addSpacing(10)
-
-        lay.addWidget(self._label("Table"))
-        self.table_combo = QComboBox()
-        self.table_combo.setPlaceholderText("Select table")
-        lay.addWidget(self.table_combo)
-
-        self.status = QLabel("")
-        self.status.setObjectName("status")
-        self.status.setWordWrap(True)
-        lay.addSpacing(6)
-        lay.addWidget(self.status)
-        lay.addSpacing(10)
-
-        self.submit_btn = QPushButton("Submit")
-        self.submit_btn.setObjectName("primary")
-        self.submit_btn.setCursor(Qt.PointingHandCursor)
-        self.submit_btn.clicked.connect(self.submit)
-        lay.addWidget(self.submit_btn)
-
-        outer.addWidget(card)
-
-    def _label(self, text):
-        l = QLabel(text)
-        l.setObjectName("fieldLabel")
-        return l
-
-    def _error(self, msg):
-        QMessageBox.critical(self, "Error", str(msg))
-
-    def load_databases(self, force=False):
-        server = self.server_edit.text().strip()
-        if not server:
-            if force:
-                self._error("Enter the server name first.")
-            return
-        if not force and server == self.loaded_server:
-            return
-
-        self.status.setText("Connecting...")
-        QApplication.processEvents()
-        with busy():
-            try:
-                if self.server_conn:
-                    self.server_conn.close()
-                self.server_conn = db_connect(server, "master")
-                cur = self.server_conn.cursor()
-                cur.execute(
-                    "SELECT name FROM sys.databases "
-                    "WHERE database_id > 4 AND state_desc = 'ONLINE' "
-                    "AND HAS_DBACCESS(name) = 1 ORDER BY name"
-                )
-                dbs = [r[0] for r in cur.fetchall()]
-            except Exception as e:
-                self.server_conn = None
-                self.loaded_server = None
-                self.status.setText("")
-                self._error(f"Could not connect to '{server}'.\n\n{e}")
-                return
-
-        self.loaded_server = server
-        self.db_combo.blockSignals(True)
-        self.db_combo.clear()
-        self.db_combo.addItems(dbs)
-        self.db_combo.setCurrentIndex(-1)
-        self.db_combo.blockSignals(False)
-        self.table_combo.clear()
-        self.status.setText(f"Connected. {len(dbs)} database(s) found.")
-
-    def load_tables(self, idx):
-        self.table_combo.clear()
-        if idx < 0 or not self.server_conn:
-            return
-        db = self.db_combo.currentText()
-        with busy():
-            try:
-                cur = self.server_conn.cursor()
-                cur.execute(
-                    f"SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE "
-                    f"FROM {q(db)}.INFORMATION_SCHEMA.TABLES "
-                    f"ORDER BY TABLE_SCHEMA, TABLE_NAME"
-                )
-                rows = cur.fetchall()
-            except Exception as e:
-                self._error(f"Could not read tables from '{db}'.\n\n{e}")
-                return
-        for schema, name, ttype in rows:
-            label = f"{schema}.{name}" + ("  (view)" if ttype == "VIEW" else "")
-            self.table_combo.addItem(label, (schema, name))
-        self.table_combo.setCurrentIndex(-1)
-        self.status.setText(f"{len(rows)} table(s) in {db}.")
-
-    def submit(self):
-        server = self.server_edit.text().strip()
-        db = self.db_combo.currentText()
-        tdata = self.table_combo.currentData()
-        if not server or not db or not tdata:
-            self._error("Please enter the server and select a database and table.")
-            return
-        schema, table = tdata
-        full = f"{q(schema)}.{q(table)}"
-
-        with busy():
-            try:
-                conn = db_connect(server, db)
-                cur = conn.cursor()
-                cur.execute(f"SELECT TOP 0 * FROM {full}")
-                cols = [d[0] for d in cur.description]
-            except Exception as e:
-                self._error(f"Could not open table.\n\n{e}")
-                return
-
-        lower = {c.lower() for c in cols}
-        needed = [USER_COLUMN, CLASS_COLUMN, FLAG_COLUMN] + [c for c, _ in RESULT_COLUMNS]
-        missing = [c for c in dict.fromkeys(needed) if c.lower() not in lower]
-        if missing:
-            conn.close()
-            self._error(
-                "These columns from the CONFIG section were not found in the table:\n  "
-                + ", ".join(missing)
-                + "\n\nColumns available in this table:\n  " + ", ".join(cols)
-                + "\n\nUpdate the column names at the top of the script."
-            )
-            return
-
-        self.connected.emit(conn, server, db, schema, table)
-
-    def close_conn(self):
-        if self.server_conn:
-            try:
-                self.server_conn.close()
-            except Exception:
-                pass
-            self.server_conn = None
-
-
-class FilterScreen(QWidget):
-    back_requested = Signal()
-
-    def __init__(self, conn, schema, table, info_text=""):
-        super().__init__()
-        self.conn = conn
-        self.table_sql = f"{q(schema)}.{q(table)}"
-        self.rows = []  # distinct (user, class, flag) combos
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        # ---------- top filter area ----------
-        top = QWidget()
-        top.setObjectName("topArea")
-        tl = QVBoxLayout(top)
-        tl.setContentsMargins(40, 28, 40, 24)
-        tl.setSpacing(18)
-
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(24)
-        grid.setVerticalSpacing(10)
-        self.dd_user = MultiSelectDropdown(USER_PLACEHOLDER)
-        self.dd_class = MultiSelectDropdown(CLASS_PLACEHOLDER)
-        self.dd_flag = MultiSelectDropdown(FLAG_PLACEHOLDER)
-        self.dropdowns = [self.dd_user, self.dd_class, self.dd_flag]
-        for col, (lbl, dd) in enumerate(zip([USER_LABEL, CLASS_LABEL, FLAG_LABEL], self.dropdowns)):
-            l = QLabel(lbl)
-            l.setObjectName("fieldLabel")
-            grid.addWidget(l, 0, col)
-            grid.addWidget(dd, 1, col)
-            grid.setColumnStretch(col, 1)
-            dd.selectionChanged.connect(self.refresh_options)
-        tl.addLayout(grid)
-
-        btn_row = QHBoxLayout()
-        back = QPushButton("← Change connection")
-        back.setObjectName("link")
-        back.setCursor(Qt.PointingHandCursor)
-        back.clicked.connect(self.back_requested.emit)
-        info = QLabel(info_text)
-        info.setObjectName("subtitle")
-        self.search_btn = QPushButton("  Search")
-        self.search_btn.setObjectName("primary")
-        self.search_btn.setIcon(QIcon(make_icon("search", "white")))
-        self.search_btn.setCursor(Qt.PointingHandCursor)
-        self.search_btn.setMinimumWidth(170)
-        self.search_btn.clicked.connect(self.run_search)
-        self.clear_btn = QPushButton("  Clear")
-        self.clear_btn.setObjectName("secondary")
-        self.clear_btn.setIcon(QIcon(make_icon("refresh", "#1c2b4a")))
-        self.clear_btn.setCursor(Qt.PointingHandCursor)
-        self.clear_btn.setMinimumWidth(160)
-        self.clear_btn.clicked.connect(self.clear_all)
-        btn_row.addWidget(back)
-        btn_row.addSpacing(12)
-        btn_row.addWidget(info)
-        btn_row.addStretch(1)
-        btn_row.addWidget(self.search_btn)
-        btn_row.addSpacing(8)
-        btn_row.addWidget(self.clear_btn)
-        tl.addLayout(btn_row)
-        root.addWidget(top)
-
-        line = QFrame()
-        line.setObjectName("divider")
-        line.setFixedHeight(1)
-        root.addWidget(line)
-
-        # ---------- results card ----------
-        body = QWidget()
-        bl = QVBoxLayout(body)
-        bl.setContentsMargins(40, 32, 40, 32)
-        card = QFrame()
-        card.setObjectName("card")
-        cl = QVBoxLayout(card)
-        cl.setContentsMargins(0, 0, 0, 0)
-        cl.setSpacing(0)
-
-        head = QHBoxLayout()
-        head.setContentsMargins(26, 16, 26, 14)
-        rt = QLabel("Results")
-        rt.setObjectName("resultsTitle")
-        self.count_lbl = QLabel("")
-        self.count_lbl.setObjectName("subtitle")
-        head.addWidget(rt)
-        head.addStretch(1)
-        head.addWidget(self.count_lbl)
-        cl.addLayout(head)
-
-        self.table = QTableWidget(0, len(RESULT_COLUMNS))
-        self.table.setHorizontalHeaderLabels([h for _, h in RESULT_COLUMNS])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.table.horizontalHeader().setHighlightSections(False)
-        self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(40)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setAlternatingRowColors(True)
-        self.table.setShowGrid(False)
-        self.table.setSortingEnabled(True)
-
-        # empty state
-        self.empty = QWidget()
-        el = QVBoxLayout(self.empty)
-        el.setAlignment(Qt.AlignCenter)
-        img = QLabel()
-        img.setPixmap(make_empty_illustration())
-        img.setAlignment(Qt.AlignCenter)
-        self.empty_title = QLabel("No results to display")
-        self.empty_title.setObjectName("emptyTitle")
-        self.empty_title.setAlignment(Qt.AlignCenter)
-        self.empty_sub = QLabel("Adjust your search criteria and try again.")
-        self.empty_sub.setObjectName("emptySub")
-        self.empty_sub.setAlignment(Qt.AlignCenter)
-        el.addWidget(img)
-        el.addWidget(self.empty_title)
-        el.addWidget(self.empty_sub)
-
-        # header row stays visible even when empty (like the design)
-        self.header_only = QTableWidget(0, len(RESULT_COLUMNS))
-        self.header_only.setHorizontalHeaderLabels([h for _, h in RESULT_COLUMNS])
-        self.header_only.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.header_only.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.header_only.verticalHeader().setVisible(False)
-        self.header_only.setFixedHeight(self.header_only.horizontalHeader().sizeHint().height())
-        self.header_only.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.header_only.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.header_only.setEnabled(False)
-
-        empty_wrap = QWidget()
-        empty_wrap.setObjectName("emptyWrap")
-        empty_wrap.setAttribute(Qt.WA_StyledBackground, True)
-        ew = QVBoxLayout(empty_wrap)
-        ew.setContentsMargins(0, 0, 0, 0)
-        ew.setSpacing(0)
-        ew.addWidget(self.header_only)
-        ew.addWidget(self.empty, 1)
-
-        self.stack = QStackedWidget()
-        self.stack.setObjectName("resultsStack")
-        self.stack.addWidget(empty_wrap)   # 0
-        self.stack.addWidget(self.table)   # 1
-        cl.addWidget(self.stack, 1)
-
-        bl.addWidget(card)
-        root.addWidget(body, 1)
-
-        self.load_data()
-
-    # ---- data ----
-    def load_data(self):
-        sql = (f"SELECT DISTINCT {q(USER_COLUMN)}, {q(CLASS_COLUMN)}, {q(FLAG_COLUMN)} "
-               f"FROM {self.table_sql}")
-        with busy():
-            try:
-                cur = self.conn.cursor()
-                cur.execute(sql)
-                self.rows = [tuple(r) for r in cur.fetchall()]
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not load dropdown values.\n\n{e}")
-                self.rows = []
-        self.refresh_options()
-
-    def refresh_options(self):
-        """Each dropdown only shows values that match what's selected in the other two."""
-        for _ in range(4):  # repeat until selections are stable
-            sel = [set(d.selected) for d in self.dropdowns]
-
-            def match(row, skip):
-                return all(i == skip or not sel[i] or row[i] in sel[i] for i in range(3))
-
-            changed = False
-            for i, dd in enumerate(self.dropdowns):
-                values = {r[i] for r in self.rows if r[i] is not None and match(r, i)}
-                if dd.set_options(values):
-                    changed = True
-            if not changed:
-                break
-
-    def run_search(self):
-        cols = ", ".join(q(c) for c, _ in RESULT_COLUMNS)
-        where, params = [], []
-        for col, dd in zip([USER_COLUMN, CLASS_COLUMN, FLAG_COLUMN], self.dropdowns):
-            if dd.selected:
-                vals = list(dd.selected)
-                where.append(f"{q(col)} IN ({', '.join('?' * len(vals))})")
-                params.extend(vals)
-        sql = f"SELECT TOP ({MAX_RESULT_ROWS}) {cols} FROM {self.table_sql}"
-        if where:
-            sql += " WHERE " + " AND ".join(where)
-
-        with busy():
-            try:
-                cur = self.conn.cursor()
-                cur.execute(sql, params)
-                data = cur.fetchall()
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Search failed.\n\n{e}")
-                return
-        self.show_results(data)
-
-    def show_results(self, data):
-        self.table.setSortingEnabled(False)
-        self.table.setRowCount(0)
-        if not data:
-            self.count_lbl.setText("0 rows")
-            self.stack.setCurrentIndex(0)
-            return
-        self.table.setRowCount(len(data))
-        for r, row in enumerate(data):
-            for c, v in enumerate(row):
-                item = QTableWidgetItem(fmt_value(v))
-                if isinstance(v, (int, float, decimal.Decimal)) and not isinstance(v, bool):
-                    item.setData(Qt.EditRole, float(v))
-                    item.setText(fmt_value(v))
-                self.table.setItem(r, c, item)
-        self.table.setSortingEnabled(True)
-        n = len(data)
-        self.count_lbl.setText(f"{n} row{'s' if n != 1 else ''}"
-                               + (f" (limit {MAX_RESULT_ROWS})" if n >= MAX_RESULT_ROWS else ""))
-        self.stack.setCurrentIndex(1)
-
-    def clear_all(self):
-        for dd in self.dropdowns:
-            dd.clear_selection()
-        self.refresh_options()
-        self.table.setRowCount(0)
-        self.count_lbl.setText("")
-        self.stack.setCurrentIndex(0)
-
-    def close_conn(self):
+import shutil
+import queue
+import threading
+import traceback
+from datetime import datetime
+import tkinter as tk
+from tkinter import ttk, messagebox
+import pythoncom
+import win32com.client as win32
+
+MAIN_REPORT_NAME = ""
+website_FOLDER_NAME = "website"
+MATCH_CHARS = 10
+LOGO_FILE = "logo.png"
+EXCEL_EXTS = (".xlsx", ".xlsm", ".xls", ".xlsb")
+MAKE_BACKUP = True
+SAVE_website_CHANGES = True
+XL_TO_LEFT = -4159
+
+
+def base_folder():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def website_folder():
+    return os.path.join(base_folder(), website_FOLDER_NAME)
+
+
+def col_num(letter):
+    n = 0
+    for ch in letter.upper().strip():
+        n = n * 26 + (ord(ch) - 64)
+    return n
+
+
+def is_blank(v):
+    return v is None or (isinstance(v, str) and v.strip() == "")
+
+
+def is_number(v):
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, (int, float)):
+        return True
+    if isinstance(v, str):
         try:
-            self.conn.close()
+            float(v.strip().replace(",", "").replace("%", ""))
+            return True
+        except ValueError:
+            return False
+    return False
+
+
+def excel_files(folder):
+    if not os.path.isdir(folder):
+        return []
+    out = []
+    for f in os.listdir(folder):
+        if f.startswith("~$"):
+            continue
+        if os.path.splitext(f)[1].lower() in EXCEL_EXTS:
+            out.append(os.path.join(folder, f))
+    return out
+
+
+def find_main_report():
+    key = MAIN_REPORT_NAME.strip().lower()
+    if not key:
+        return None
+    matches = [p for p in excel_files(base_folder())
+               if os.path.splitext(os.path.basename(p))[0].lower().startswith(key)]
+    if not matches:
+        return None
+    return max(matches, key=os.path.getmtime)
+
+
+def match_key(name):
+    return name[:MATCH_CHARS].strip().lower()
+
+
+def find_website(name):
+    key = match_key(name)
+    matches = [p for p in excel_files(website_folder())
+               if match_key(os.path.splitext(os.path.basename(p))[0]).startswith(key)]
+    if not matches:
+        return None
+    return max(matches, key=os.path.getmtime)
+
+
+def backup_report(path):
+    folder = os.path.join(os.path.dirname(path), "Backup")
+    os.makedirs(folder, exist_ok=True)
+    stem, ext = os.path.splitext(os.path.basename(path))
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = os.path.join(folder, f"{stem}_{stamp}{ext}")
+    shutil.copy2(path, dest)
+    return dest
+
+
+def read_values(ws):
+    ur = ws.UsedRange
+    last_row = ur.Row + ur.Rows.Count - 1
+    last_col = ur.Column + ur.Columns.Count - 1
+
+    data = ws.Range(ws.Cells(1, 1), ws.Cells(last_row, last_col)).Value
+    if not isinstance(data, tuple):
+        data = ((data,),)
+    return [list(r) for r in data], last_row, last_col
+
+
+def set_cell(ws, r, c, value):
+    ws.Range(ws.Cells(r, c), ws.Cells(r, c)).Value = value
+
+
+def keep_keys(job):
+    keys = list(job.get("keep_blank_before") or [])
+    if job.get("fill_labels"):
+        keys.append(job["fill_labels"]["key"])
+    return {str(k).strip().upper() for k in keys}
+
+
+def key_col_of(row, keys):
+    first = next((k for k, x in enumerate(row) if not is_blank(x)), None)
+    if first is None:
+        return None
+    if str(row[first]).strip().upper() in keys:
+        return first
+    return None
+
+
+def fill_missing_labels(ws, job, log):
+    cfg = job.get("fill_labels")
+    if not cfg:
+        return
+
+    rows, _, _ = read_values(ws)
+    start = job.get("align_from_row", 1)
+    keys = {str(cfg["key"]).strip().upper()}
+    labels = cfg["labels"]
+    n = len(labels)
+
+    def val(r, c):
+        if r >= len(rows) or c >= len(rows[r]):
+            return None
+        return rows[r][c]
+
+    filled = 0
+    for r in range(start - 1, len(rows)):
+        key_c = key_col_of(rows[r], keys)
+        if not key_c:
+            continue
+        chk = key_c - 1
+        if r + n >= len(rows):
+            continue
+        if all(is_blank(val(r + 1 + i, chk)) for i in range(n)):
+            for i, label in enumerate(labels):
+                set_cell(ws, r + 2 + i, chk + 1, label)
+                rows[r + 1 + i][chk] = label
+            filled += 1
+    log(f"  '{cfg['key']}' label sets filled: {filled}")
+
+
+def add_suffix(ws, job, log):
+    cfg = job.get("add_suffix")
+    if not cfg:
+        return
+    text = cfg["text"]
+    rows, last_row, _ = read_values(ws)
+    done = 0
+    for r in cfg["rows"]:
+        if r < 1 or r > last_row:
+            continue
+        for c, v in enumerate(rows[r - 1]):
+            if isinstance(v, str) and v.strip() and not is_number(v) \
+                    and not v.rstrip().endswith(text.strip()):
+                set_cell(ws, r, c + 1, v.rstrip() + text)
+                done += 1
+    log(f"  '{text.strip()}' added to {done} cell(s)")
+
+
+def is_total_row(row):
+    return any(isinstance(x, str) and x.strip().lower() == "total" for x in row)
+
+
+def is_zero(v):
+    return is_number(v) and float(str(v).replace(",", "").replace("%", "")) == 0
+
+
+def add_row_after_total(ws, job, log):
+    mode = job.get("row_after_total")
+    if mode not in ("blank", "zero"):
+        return
+    start = job.get("align_from_row", 1)
+    rows, last_row, last_col = read_values(ws)
+
+    added = 0
+    for r in range(last_row, start - 1, -1):
+        if not is_total_row(rows[r - 1]):
+            continue
+        nxt = rows[r] if r < last_row else None
+        if mode == "blank":
+            if nxt is not None and all(is_blank(x) for x in nxt):
+                continue
+            ws.Rows(r + 1).Insert()
+        else:
+            if nxt is not None and all(is_zero(x) for x in nxt[:last_col]):
+                continue
+            ws.Rows(r + 1).Insert()
+            ws.Range(ws.Cells(r + 1, 1), ws.Cells(r + 1, last_col)).Value = 0
+        added += 1
+    log(f"  {'Blank' if mode == 'blank' else '0'} rows added below Total: {added}")
+
+
+def clean_website_sheet(ws, job, log):
+    start = job.get("align_from_row", 1)
+
+    ws.Cells.UnMerge()
+
+    if job.get("remove_blank_rows", True):
+        rows, last_row, _ = read_values(ws)
+        removed = 0
+        for r in range(last_row, start - 1, -1):
+            if all(is_blank(x) for x in rows[r - 1]):
+                ws.Rows(r).Delete()
+                removed += 1
+        log(f"  Blank rows removed: {removed}")
+
+    fill_missing_labels(ws, job, log)
+
+    rows, last_row, _ = read_values(ws)
+    keys = keep_keys(job)
+
+    moved = 0
+    for r in range(start, last_row + 1):
+        v = rows[r - 1]
+        first = next((k for k, x in enumerate(v) if not is_blank(x)), None)
+        if keys and first and key_col_of(v, keys) == first:
+            first -= 1
+        if first:
+            ws.Range(ws.Cells(r, 1), ws.Cells(r, first)).Delete(XL_TO_LEFT)
+            moved += 1
+    log(f"  Rows moved to start at column A: {moved}")
+
+    if job.get("remove_blank_columns", True):
+        rows, last_row, last_col = read_values(ws)
+        removed = 0
+        if last_row >= start:
+            for c in range(last_col, 0, -1):
+                if all(is_blank(rows[r - 1][c - 1]) for r in range(start, last_row + 1)):
+                    ws.Range(ws.Cells(start, c), ws.Cells(last_row, c)).Delete(XL_TO_LEFT)
+                    removed += 1
+        log(f"  Blank columns removed: {removed}")
+
+    add_suffix(ws, job, log)
+    add_row_after_total(ws, job, log)
+
+
+def get_copy_data(ws, job):
+    rows, _, _ = read_values(ws)
+    cp = job["copy"]
+    a = col_num(cp["cols"][0]) - 1
+    b = col_num(cp["cols"][1]) - 1
+    stop_at_blank = job.get("row_after_total") != "blank"
+
+    picked = []
+    for i in range(cp["start_row"] - 1, len(rows)):
+        row = rows[i] + [None] * (b + 1 - len(rows[i]))
+        part = tuple(None if is_blank(x) else x for x in row[a:b + 1])
+        if all(is_blank(x) for x in row):
+            if stop_at_blank:
+                break
+        picked.append(part)
+
+    while picked and all(x is None for x in picked[-1]):
+        picked.pop()
+    return picked, (b - a + 1)
+
+
+def get_website_data(excel, job, log, read_only):
+    path = find_website(job["website_file"])
+    if not path:
+        raise FileNotFoundError(f"No file starting with '{job['website_file'][:MATCH_CHARS]}' in the website folder")
+    log(f"  website file: {os.path.basename(path)}")
+
+    wb = excel.Workbooks.Open(path, 0, read_only)
+    try:
+        if not read_only and SAVE_website_CHANGES and wb.ReadOnly:
+            raise RuntimeError("website file is open somewhere else. Close it and try again.")
+        ws = wb.Worksheets(job["website_sheet"]) if job.get("website_sheet") else wb.Worksheets(1)
+
+        clean_website_sheet(ws, job, log)
+        if not read_only and SAVE_website_CHANGES:
+            wb.Save()
+            log("  website file cleaned and saved")
+
+        return get_copy_data(ws, job)
+    finally:
+        wb.Close(SaveChanges=False)
+
+
+def paste(report_wb, job, data, ncols):
+    ws = report_wb.Worksheets(job["target_sheet"])
+    tgt = ws.Range(job["target_cell"])
+    r0, c0 = tgt.Row, tgt.Column
+
+    if job.get("clear_old_data", True):
+        ur = ws.UsedRange
+        last = ur.Row + ur.Rows.Count - 1
+        if last >= r0:
+            ws.Range(ws.Cells(r0, c0), ws.Cells(last, c0 + ncols - 1)).ClearContents()
+
+    if data:
+        ws.Range(ws.Cells(r0, c0), ws.Cells(r0 + len(data) - 1, c0 + ncols - 1)).Value = tuple(data)
+
+
+def norm(v):
+    if is_blank(v):
+        return None
+    if isinstance(v, bool):
+        return str(v)
+    if isinstance(v, (int, float)):
+        return round(float(v), 6)
+    s = str(v).strip()
+    try:
+        return round(float(s.replace(",", "")), 6)
+    except ValueError:
+        return s
+
+
+def compare(report_wb, job, data, ncols, log):
+    ws = report_wb.Worksheets(job["target_sheet"])
+    tgt = ws.Range(job["target_cell"])
+    r0, c0 = tgt.Row, tgt.Column
+
+    ur = ws.UsedRange
+    last = max(ur.Row + ur.Rows.Count - 1, r0 + len(data) - 1, r0)
+    vals = ws.Range(ws.Cells(r0, c0), ws.Cells(last, c0 + ncols - 1)).Value
+    if not isinstance(vals, tuple):
+        vals = ((vals,),)
+
+    diffs = []
+    for i, row in enumerate(vals):
+        for j in range(ncols):
+            expected = data[i][j] if i < len(data) else None
+            if norm(expected) != norm(row[j]):
+                diffs.append((r0 + i, c0 + j, expected, row[j]))
+
+    for (r, c, e, a) in diffs[:5]:
+        cell = ws.Cells(r, c).Address.replace("$", "")
+        log(f"    {cell}: website = {e!r} | report = {a!r}")
+    if len(diffs) > 5:
+        log(f"    ... and {len(diffs) - 5} more")
+    return len(diffs)
+
+
+def new_excel():
+    excel = win32.DispatchEx("Excel.Application")
+    excel.Visible = False
+    excel.DisplayAlerts = False
+    excel.ScreenUpdating = False
+    return excel
+
+
+def run_update(log, status, progress, stop):
+    errors = []
+    excel = new_excel()
+    report_wb = None
+    try:
+        report_path = find_main_report()
+        if not report_path:
+            raise FileNotFoundError(f"Main report '{MAIN_REPORT_NAME}' not found in {base_folder()}")
+        log(f"Main report: {os.path.basename(report_path)}")
+
+        if MAKE_BACKUP:
+            log(f"Backup saved: {os.path.basename(backup_report(report_path))}")
+
+        report_wb = excel.Workbooks.Open(report_path, 0, False)
+        if report_wb.ReadOnly:
+            raise RuntimeError("The main report is open somewhere else. Close it and run again.")
+
+        for i, job in enumerate(JOBS):
+            if stop():
+                log("")
+                log("Stopped by user. The report was NOT saved.")
+                return errors
+            log("")
+            log(f"--- {job['name']} ---")
+            status(i, "Updating")
+            try:
+                data, ncols = get_website_data(excel, job, log, read_only=False)
+                paste(report_wb, job, data, ncols)
+                log(f"  Pasted {len(data)} rows into '{job['target_sheet']}' at {job['target_cell']}")
+            except Exception as e:
+                errors.append(f"{job['name']}: {e}")
+                log(f"  ERROR: {e}")
+            progress(i + 1)
+
+        excel.CalculateFull()
+        try:
+            first = report_wb.Worksheets(1)
+            first.Activate()
+            first.Range("A1").Select()
         except Exception:
             pass
 
+        report_wb.Save()
+        log("")
+        log("Report saved.")
 
-# ---------------------------------------------------------------------
-#  Main window
-# ---------------------------------------------------------------------
-class MainWindow(QMainWindow):
+    except Exception as e:
+        errors.append(str(e))
+        log(f"ERROR: {e}")
+        log(traceback.format_exc())
+
+    finally:
+        try:
+            if report_wb is not None:
+                report_wb.Close(SaveChanges=False)
+        except Exception:
+            pass
+        excel.ScreenUpdating = True
+        excel.Quit()
+    return errors
+
+
+def run_qc(log, status, progress, stop):
+    errors = []
+    excel = new_excel()
+    report_wb = None
+    try:
+        report_path = find_main_report()
+        if not report_path:
+            raise FileNotFoundError(f"Main report '{MAIN_REPORT_NAME}' not found in {base_folder()}")
+        log(f"QC against: {os.path.basename(report_path)} (read only)")
+
+        report_wb = excel.Workbooks.Open(report_path, 0, True)
+
+        for i, job in enumerate(JOBS):
+            if stop():
+                log("")
+                log("QC stopped by user.")
+                return errors
+            log("")
+            log(f"--- QC {job['name']} ---")
+            status(i, "Checking")
+            try:
+                data, ncols = get_website_data(excel, job, log, read_only=True)
+                n = compare(report_wb, job, data, ncols, log)
+                if n == 0:
+                    log(f"  OK · {len(data)} rows match")
+                else:
+                    log(f"  {n} cell(s) don't match")
+                    errors.append(f"{job['name']}: {n} cell(s) don't match")
+            except Exception as e:
+                errors.append(f"{job['name']}: {e}")
+                log(f"  ERROR: {e}")
+            progress(i + 1)
+
+    except Exception as e:
+        errors.append(str(e))
+        log(f"ERROR: {e}")
+
+    finally:
+        try:
+            if report_wb is not None:
+                report_wb.Close(SaveChanges=False)
+        except Exception:
+            pass
+        excel.ScreenUpdating = True
+        excel.Quit()
+    return errors
+
+
+C = {
+    "bg": "#FFFFFF",
+    "footer": "#F7F8FA",
+    "line": "#E4E7EC",
+    "field": "#D0D5DD",
+    "text": "#101828",
+    "sub": "#475467",
+    "muted": "#98A2B3",
+    "blue": "#1F4FB8",
+    "blue_hover": "#183F94",
+    "yellow": "#F6B820",
+    "yellow_hover": "#E3A70F",
+    "red": "#D92D20",
+    "red_soft": "#FEF3F2",
+    "disabled": "#F2F4F7",
+    "disabled_text": "#98A2B3",
+    "track": "#EAECF0",
+    "ok": "#039855",
+    "bad": "#D92D20",
+    "busy": "#DC8B00",
+}
+FONT = "Segoe UI"
+
+
+def fmt_clock(sec):
+    m, s = divmod(int(sec), 60)
+    h, m = divmod(m, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def fmt_took(sec):
+    return f"{sec:.1f}s" if sec < 60 else f"{int(sec // 60)}m {int(sec % 60):02d}s"
+
+
+def round_rect(c, x1, y1, x2, y2, r, **kw):
+    pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
+           x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+    return c.create_polygon(pts, smooth=True, **kw)
+
+
+class Button(tk.Canvas):
+
+    def __init__(self, parent, text, command, style="primary", width=92, height=34):
+        super().__init__(parent, width=width, height=height, bg=parent["bg"],
+                         highlightthickness=0, bd=0, cursor="hand2")
+        self.cmd, self.enabled, self.style_name = command, True, style
+        s = {
+            "primary": (C["blue"], C["blue_hover"], "#FFFFFF", ""),
+            "accent": (C["yellow"], C["yellow_hover"], C["text"], ""),
+            "outline": ("#FFFFFF", C["red_soft"], C["red"], C["field"]),
+        }[style]
+        self.fill, self.hover, self.fg, self.border = s
+        self.shape = round_rect(self, 1, 1, width - 1, height - 1, 6,
+                                fill=self.fill, outline=self.border or self.fill)
+        self.label = self.create_text(width / 2, height / 2, text=text, fill=self.fg, font=(FONT, 9, "bold"))
+        self.bind("<Enter>", lambda e: self.enabled and self.itemconfig(self.shape, fill=self.hover))
+        self.bind("<Leave>", lambda e: self.enabled and self.itemconfig(self.shape, fill=self.fill))
+        self.bind("<Button-1>", lambda e: self.enabled and self.cmd())
+
+    def set_enabled(self, on):
+        self.enabled = on
+        self.itemconfig(self.shape, fill=self.fill if on else C["disabled"],
+                        outline=(self.border or self.fill) if on else C["line"])
+        self.itemconfig(self.label, fill=self.fg if on else C["disabled_text"])
+        self.config(cursor="hand2" if on else "arrow")
+
+
+class ThinBar(tk.Canvas):
+
+    def __init__(self, parent, width, height=4):
+        super().__init__(parent, width=width, height=height, bg=parent["bg"], highlightthickness=0, bd=0)
+        self.w, self.h, self.maximum = width, height, 1
+        round_rect(self, 0, 0, width, height, 2, fill=C["track"], outline="")
+        self.bar = round_rect(self, 0, 0, 0, height, 2, fill=C["blue"], outline="")
+
+    def set(self, value, maximum=None):
+        if maximum:
+            self.maximum = maximum
+        x = max(0, min(1, value / max(self.maximum, 1))) * self.w
+        self.coords(self.bar, *self._pts(x))
+        self.itemconfig(self.bar, state="normal" if x > 0 else "hidden")
+
+    def _pts(self, x2):
+        r, h = 2, self.h
+        x2 = max(x2, 2 * r)
+        return [r, 0, x2 - r, 0, x2, 0, x2, r, x2, h - r, x2, h, x2 - r, h, r, h, 0, h, 0, h - r, 0, r, 0, 0]
+
+
+class LinkLabel(tk.Label):
+    def __init__(self, parent, text, command):
+        super().__init__(parent, text=text, bg=parent["bg"], fg=C["sub"], cursor="hand2", font=(FONT, 9))
+        self.bind("<Enter>", lambda e: self.config(fg=C["blue"], font=(FONT, 9, "underline")))
+        self.bind("<Leave>", lambda e: self.config(fg=C["sub"], font=(FONT, 9)))
+        self.bind("<Button-1>", lambda e: command())
+
+
+class App(tk.Tk):
+    W, H = 640, 400
+    PAD = 32
+
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(APP_TITLE)
-        self.setWindowIcon(QIcon(make_icon("app", size=32)))
-        self.resize(1240, 820)
+        self.title("Excel Report Updater")
+        self.configure(bg=C["bg"])
+        self.resizable(False, False)
+        x = (self.winfo_screenwidth() - self.W) // 2
+        y = (self.winfo_screenheight() - self.H) // 3
+        self.geometry(f"{self.W}x{self.H}+{x}+{y}")
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        self.stack = QStackedWidget()
-        self.stack.setObjectName("root")
-        self.setCentralWidget(self.stack)
+        self.q = queue.Queue()
+        self.busy = False
+        self.stop_evt = threading.Event()
+        self.log_lines = []
+        self.t0 = None
+        self.mode = ""
 
-        self.login = LoginScreen()
-        self.login.connected.connect(self.open_filter_screen)
-        self.stack.addWidget(self.login)
-        self.filter_screen = None
+        self._build()
+        self.refresh()
+        self.after(100, self._poll)
+        self.after(50, self._no_maximize)
 
-    def open_filter_screen(self, conn, server, db, schema, table):
-        self._drop_filter_screen()
-        self.filter_screen = FilterScreen(conn, schema, table, f"{server} · {db} · {schema}.{table}")
-        self.filter_screen.back_requested.connect(self.go_back)
-        self.stack.addWidget(self.filter_screen)
-        self.stack.setCurrentWidget(self.filter_screen)
+    def _no_maximize(self):
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetParent(self.winfo_id())
+            style = user32.GetWindowLongW(hwnd, -16)
+            user32.SetWindowLongW(hwnd, -16, style & ~0x00010000)
+            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0020)
+        except Exception:
+            pass
 
-    def go_back(self):
-        self._drop_filter_screen()
-        self.stack.setCurrentWidget(self.login)
+    def on_close(self):
+        if self.busy:
+            messagebox.showinfo("Still working", "Please press Stop and wait until it finishes.")
+            return
+        self.destroy()
 
-    def _drop_filter_screen(self):
-        if self.filter_screen:
-            self.filter_screen.close_conn()
-            self.stack.removeWidget(self.filter_screen)
-            self.filter_screen.deleteLater()
-            self.filter_screen = None
+    def _build(self):
+        strip = tk.Canvas(self, width=self.W, height=3, bg=C["blue"], highlightthickness=0, bd=0)
+        strip.pack(fill="x")
+        strip.create_rectangle(self.W - 120, 0, self.W, 3, fill=C["yellow"], outline="")
 
-    def closeEvent(self, e):
-        self._drop_filter_screen()
-        self.login.close_conn()
-        super().closeEvent(e)
+        logo_box = tk.Frame(self, bg=C["bg"], width=267, height=148)
+        logo_box.pack(pady=(6, 0))
+        logo_box.pack_propagate(False)
+        self.logo_img = None
+        path = os.path.join(base_folder(), LOGO_FILE)
+        if os.path.exists(path):
+            try:
+                self.logo_img = tk.PhotoImage(file=path)
+                tk.Label(logo_box, image=self.logo_img, bg=C["bg"], bd=0).pack(expand=True)
+            except Exception:
+                self.logo_img = None
+        if self.logo_img is None:
+            cv = tk.Canvas(logo_box, width=267, height=148, bg=C["bg"], highlightthickness=0)
+            cv.pack()
+            cv.create_rectangle(1, 1, 266, 147, outline=C["line"], dash=(4, 3))
+            cv.create_text(133, 66, text="LOGO", fill=C["muted"], font=(FONT, 14, "bold"))
+            cv.create_text(133, 88, text=f"{LOGO_FILE}  ·  267 × 148", fill=C["muted"], font=(FONT, 8))
 
+        tk.Label(self, text="Excel Report Updater", bg=C["bg"], fg=C["text"],
+                 font=(FONT, 13, "bold")).pack(pady=(4, 0))
 
-STYLE = """
-* { font-family: 'Segoe UI', 'Inter', Arial; font-size: 14px; color: #1c2b4a; }
-QMainWindow, #root { background: #f4f7fc; }
-#resultsStack, #emptyWrap { background: white; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
-#topArea { background: #f8faff; }
-#divider { background: #e1e7f2; }
+        footer = tk.Frame(self, bg=C["footer"], height=56)
+        footer.pack(side="bottom", fill="x")
+        footer.pack_propagate(False)
+        tk.Frame(footer, bg=C["line"], height=1).pack(side="top", fill="x")
+        fin = tk.Frame(footer, bg=C["footer"])
+        fin.pack(fill="both", expand=True, padx=self.PAD)
+        LinkLabel(fin, "View log", self.open_log).pack(side="left")
+        tk.Label(fin, text="|", bg=C["footer"], fg=C["line"], font=(FONT, 9)).pack(side="left", padx=8)
+        LinkLabel(fin, "Open folder", self.open_folder).pack(side="left")
 
-#card { background: white; border: 1px solid #dfe5f0; border-radius: 10px; }
-#title { font-size: 22px; font-weight: 700; }
-#subtitle { color: #6b7590; font-size: 13px; }
-#status { color: #4a6fb5; font-size: 13px; }
-#fieldLabel { font-size: 15px; font-weight: 600; }
-#resultsTitle { font-size: 24px; font-weight: 700; }
-#emptyTitle { font-size: 20px; font-weight: 700; margin-top: 6px; }
-#emptySub { color: #5b6478; font-size: 15px; }
+        self.run_btn = Button(fin, "Run", self.start_run, "primary", width=96)
+        self.run_btn.pack(side="right")
+        self.qc_btn = Button(fin, "QC Check", self.start_qc, "accent", width=96)
+        self.qc_btn.pack(side="right", padx=(0, 8))
+        self.stop_btn = Button(fin, "Stop", self.stop, "outline", width=76)
+        self.stop_btn.pack(side="right", padx=(0, 8))
+        self.stop_btn.set_enabled(False)
 
-QLineEdit, QComboBox {
-    background: white; border: 1px solid #cfd7e6; border-radius: 6px;
-    padding: 0 12px; min-height: 42px;
-}
-QLineEdit:focus, QComboBox:focus { border: 1px solid #1e63e9; }
-QComboBox::drop-down { border: none; width: 30px; }
-QComboBox QAbstractItemView {
-    background: white; border: 1px solid #cfd7e6; selection-background-color: #eaf1fe;
-    selection-color: #1c2b4a; outline: 0; padding: 4px;
-}
+        tk.Frame(self, bg=C["line"], height=1).pack(fill="x", padx=self.PAD, pady=(6, 0))
+        body = tk.Frame(self, bg=C["bg"])
+        body.pack(fill="both", expand=True, padx=self.PAD, pady=(10, 0))
 
-#ddField { background: white; border: 1px solid #cfd7e6; border-radius: 6px; }
-#ddField:hover { border: 1px solid #9fb3d9; }
-#ddField[open="true"] { border: 1px solid #1e63e9; }
-QLabel[placeholder="true"] { color: #4b5468; }
+        r1 = tk.Frame(body, bg=C["bg"])
+        r1.pack(fill="x")
+        tk.Label(r1, text="Report file", bg=C["bg"], fg=C["sub"], font=(FONT, 9), width=10,
+                 anchor="w").pack(side="left")
+        self.report_var = tk.StringVar(value=MAIN_REPORT_NAME)
+        self.entry = tk.Entry(r1, textvariable=self.report_var, font=(FONT, 10),
+                              bg="#FFFFFF", fg=C["text"], relief="flat", insertbackground=C["text"],
+                              highlightthickness=1, highlightbackground=C["field"], highlightcolor=C["blue"],
+                              disabledbackground=C["footer"], disabledforeground=C["muted"])
+        self.entry.pack(side="left", fill="x", expand=True, ipady=4, padx=(0, 12))
+        self.entry.bind("<Return>", lambda e: (self.focus_set(), self.refresh()))
+        self.entry.bind("<FocusOut>", lambda e: self.refresh())
+        self.report_ok = tk.Label(r1, text="", bg=C["bg"], font=(FONT, 9), width=10, anchor="w")
+        self.report_ok.pack(side="left")
 
-#ddPopup { background: white; border: 1px solid #cfd7e6; border-radius: 6px; }
-#ddSearch { min-height: 34px; border: 1px solid #e1e7f2; }
-#ddList { border: none; outline: 0; background: white; }
-#ddList::item { padding: 8px 6px; border-radius: 4px; margin: 1px 0; }
-#ddList::item:hover { background: #f2f6fd; }
+        r2 = tk.Frame(body, bg=C["bg"])
+        r2.pack(fill="x", pady=(10, 0))
+        self.dot = tk.Canvas(r2, width=8, height=8, bg=C["bg"], highlightthickness=0)
+        self.dot_id = self.dot.create_oval(0, 0, 8, 8, fill=C["ok"], outline="")
+        self.dot.pack(side="left", pady=(2, 0))
+        self.status_lbl = tk.Label(r2, text="", bg=C["bg"], fg=C["text"], font=(FONT, 10, "bold"))
+        self.status_lbl.pack(side="left", padx=(8, 0))
+        self.timer_lbl = tk.Label(r2, text="00:00", bg=C["bg"], fg=C["sub"], font=(FONT, 10))
+        self.timer_lbl.pack(side="right")
+        tk.Label(r2, text="Elapsed", bg=C["bg"], fg=C["muted"], font=(FONT, 8)).pack(side="right", padx=(0, 6))
 
-QPushButton { border-radius: 6px; padding: 0 22px; min-height: 46px; font-size: 16px; font-weight: 600; }
-QPushButton#primary { background: #1e63e9; color: white; border: none; }
-QPushButton#primary:hover { background: #1853c7; }
-QPushButton#primary:pressed { background: #1446a8; }
-QPushButton#secondary { background: white; border: 1px solid #cfd7e6; }
-QPushButton#secondary:hover { background: #f2f6fd; }
-QPushButton#link { background: transparent; border: none; color: #1e63e9; font-size: 13px;
-                   padding: 0; min-height: 0; font-weight: 600; }
-QPushButton#link:hover { text-decoration: underline; }
+        self.pbar = ThinBar(body, width=self.W - 2 * self.PAD)
+        self.pbar.pack(fill="x", pady=(8, 0))
+        self.step_lbl = tk.Label(body, text="", bg=C["bg"], fg=C["sub"], font=(FONT, 9), anchor="w")
+        self.step_lbl.pack(fill="x", pady=(6, 0))
 
-QTableWidget { border: none; background: white; alternate-background-color: #fafbfe;
-               gridline-color: #eef1f7; selection-background-color: #eaf1fe; selection-color: #1c2b4a; }
-QTableWidget::item { padding: 0 14px; border-bottom: 1px solid #eef1f7; }
-QHeaderView::section {
-    background: #eef2fa; color: #1c2b4a; font-size: 15px; font-weight: 700;
-    padding: 14px 18px; border: none; border-right: 1px solid #dfe5f0;
-    border-top: 1px solid #dfe5f0; border-bottom: 1px solid #dfe5f0;
-}
-QHeaderView::section:last { border-right: none; }
-QScrollBar:vertical { background: transparent; width: 10px; }
-QScrollBar::handle:vertical { background: #cfd7e6; border-radius: 5px; min-height: 30px; }
-QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
-"""
+    def set_status(self, text, color):
+        self.status_lbl.config(text=text)
+        self.dot.itemconfig(self.dot_id, fill=color)
 
+    def refresh(self):
+        if self.busy:
+            return
+        global MAIN_REPORT_NAME
+        MAIN_REPORT_NAME = self.report_var.get().strip() or MAIN_REPORT_NAME
+        rp = find_main_report()
+        if rp:
+            self.report_ok.config(text="✓  Found", fg=C["ok"])
+        else:
+            self.report_ok.config(text="✕  Not found", fg=C["bad"])
 
-def main():
-    app = QApplication(sys.argv)
-    app.setStyle("Fusion")
-    app.setStyleSheet(STYLE)
-    w = MainWindow()
-    w.show()
-    sys.exit(app.exec())
+        missing = [j["name"] for j in JOBS if not find_website(j["website_file"])]
+        found = len(JOBS) - len(missing)
+        if rp and not missing:
+            self.set_status("Ready", C["ok"])
+        else:
+            self.set_status("Action needed", C["bad"])
+        self.step_lbl.config(
+            text=f"{found} of {len(JOBS)} website files found" +
+                 (f"  ·  missing: {', '.join(missing[:3])}{'…' if len(missing) > 3 else ''}" if missing else ""))
+        self.pbar.set(0, len(JOBS))
+
+    def _set_busy(self, on):
+        self.busy = on
+        self.run_btn.set_enabled(not on)
+        self.qc_btn.set_enabled(not on)
+        self.stop_btn.set_enabled(on)
+        self.entry.config(state="disabled" if on else "normal")
+
+    def open_folder(self):
+        try:
+            os.startfile(base_folder())
+        except Exception:
+            pass
+
+    def open_log(self):
+        names = ["update_log.txt", "qc_log.txt"]
+        paths = [os.path.join(base_folder(), n) for n in names]
+        paths = [p for p in paths if os.path.exists(p)]
+        if not paths:
+            messagebox.showinfo("No log yet", "Run or QC first.")
+            return
+        try:
+            os.startfile(max(paths, key=os.path.getmtime))
+        except Exception:
+            pass
+
+    def _log(self, msg=""):
+        self.q.put(("log", msg))
+
+    def _status(self, i, text):
+        self.q.put(("step", f"{text} {JOBS[i]['name']}  ·  {i + 1} of {len(JOBS)}"))
+
+    def _progress(self, n):
+        self.q.put(("progress", n))
+
+    def _poll(self):
+        try:
+            while True:
+                kind, val = self.q.get_nowait()
+                if kind == "log":
+                    self.log_lines.append(val)
+                elif kind == "step":
+                    self.step_lbl.config(text=val)
+                elif kind == "progress":
+                    self.pbar.set(val)
+                elif kind == "done":
+                    self._finish(val)
+        except queue.Empty:
+            pass
+        self.after(100, self._poll)
+
+    def _tick(self):
+        if self.busy and self.t0:
+            self.timer_lbl.config(text=fmt_clock(time.time() - self.t0))
+            self.after(500, self._tick)
+
+    def _start(self, worker, title):
+        if self.busy:
+            return
+        self.refresh()
+        if not find_main_report():
+            messagebox.showerror("Report not found",
+                                 f"No file starting with '{MAIN_REPORT_NAME}' was found next to the app.")
+            return
+
+        self.mode = title
+        self.stop_evt.clear()
+        self.log_lines = [f"{title} started {datetime.now():%d-%m-%Y %H:%M:%S}"]
+        self._set_busy(True)
+        self.set_status("Updating report" if title == "Run" else "Running QC check", C["busy"])
+        self.step_lbl.config(text="Opening Excel…")
+        self.timer_lbl.config(fg=C["text"])
+        self.pbar.set(0, len(JOBS))
+        self.t0 = time.time()
+        self._tick()
+
+        def task():
+            pythoncom.CoInitialize()
+            try:
+                errors = worker(self._log, self._status, self._progress, self.stop_evt.is_set)
+            except Exception as e:
+                errors = [str(e)]
+                self._log(f"ERROR: {e}")
+            finally:
+                pythoncom.CoUninitialize()
+            self.q.put(("done", errors))
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def start_run(self):
+        if messagebox.askyesno("Run", "Update the report now?\n\nA backup copy is saved first."):
+            self._start(run_update, "Run")
+
+    def start_qc(self):
+        self._start(run_qc, "QC")
+
+    def stop(self):
+        if self.busy and not self.stop_evt.is_set():
+            self.stop_evt.set()
+            self.stop_btn.set_enabled(False)
+            self.set_status("Stopping", C["busy"])
+            self.step_lbl.config(text="Finishing the current file, then stopping…")
+
+    def _finish(self, errors):
+        took = time.time() - self.t0 if self.t0 else 0
+        title = self.mode
+        stopped = self.stop_evt.is_set()
+        self._set_busy(False)
+        self.timer_lbl.config(text=fmt_clock(took), fg=C["sub"])
+
+        self.log_lines.append(f"{title} took {fmt_took(took)}")
+        try:
+            name = "update_log.txt" if title == "Run" else "qc_log.txt"
+            with open(os.path.join(base_folder(), name), "w", encoding="utf-8") as f:
+                f.write("\n".join(self.log_lines))
+        except Exception:
+            pass
+
+        if stopped:
+            self.set_status("Stopped", C["busy"])
+            self.step_lbl.config(text=f"Stopped after {fmt_took(took)}"
+                                      + ("  ·  report not changed" if title == "Run" else ""))
+        elif errors:
+            self.set_status(f"{title} completed with {len(errors)} issue(s)", C["bad"])
+            self.step_lbl.config(text=f"Took {fmt_took(took)}  ·  click View log for details")
+            messagebox.showwarning(f"{title} completed", "\n".join(errors[:10]))
+        else:
+            done = "Report updated successfully" if title == "Run" else "QC passed  ·  all data matches"
+            self.set_status(done, C["ok"])
+            self.pbar.set(len(JOBS))
+            self.step_lbl.config(text=f"Completed in {fmt_took(took)}  ·  {len(JOBS)} of {len(JOBS)} files")
 
 
 if __name__ == "__main__":
-    main()
+    App().mainloop()
