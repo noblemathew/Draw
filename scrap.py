@@ -1,7 +1,7 @@
 
 users = [
     {"id": 101, "name": "Arun Mathew", "role": "Data Analyst", "status": "Active"},
-    {"id": 102, "name": "Amy John", "role": "Software Developer", "status": "Active"},
+    {"id": 102, "name": "Rohan John", "role": "Software Developer", "status": "Active"},
     {"id": 103, "name": "Rahul Thomas", "role": "Python Developer", "status": "Inactive"},
     {"id": 104, "name": "Neha George", "role": "Data Engineer", "status": "Active"},
 ]
