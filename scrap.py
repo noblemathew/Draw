@@ -104,11 +104,19 @@ def set_cell(ws, r, c, value):
     ws.Range(ws.Cells(r, c), ws.Cells(r, c)).Value = value
 
 
+def as_keys(value):
+    if value is None:
+        return set()
+    if isinstance(value, (list, tuple, set)):
+        return {str(k).strip().upper() for k in value if not is_blank(k)}
+    return {str(value).strip().upper()}
+
+
 def keep_keys(job):
-    keys = list(job.get("keep_blank_before") or [])
+    keys = as_keys(job.get("keep_blank_before"))
     if job.get("fill_labels"):
-        keys.append(job["fill_labels"]["key"])
-    return {str(k).strip().upper() for k in keys}
+        keys |= as_keys(job["fill_labels"].get("key"))
+    return keys
 
 
 def key_col_of(row, keys):
@@ -127,7 +135,7 @@ def fill_missing_labels(ws, job, log):
 
     rows, _, _ = read_values(ws)
     start = job.get("align_from_row", 1)
-    keys = {str(cfg["key"]).strip().upper()}
+    keys = as_keys(cfg.get("key"))
     labels = cfg["labels"]
     n = len(labels)
 
@@ -149,7 +157,7 @@ def fill_missing_labels(ws, job, log):
                 set_cell(ws, r + 2 + i, chk + 1, label)
                 rows[r + 1 + i][chk] = label
             filled += 1
-    log(f"  '{cfg['key']}' label sets filled: {filled}")
+    log(f"  Label sets filled: {filled}")
 
 
 def add_suffix(ws, job, log):
