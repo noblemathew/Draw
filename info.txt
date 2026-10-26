@@ -1,6 +1,5 @@
 CREATE DATABASE DRawDB;
 GO
-
 USE DRawDB;
 GO
 
