@@ -1,170 +1,44 @@
-if db_id(N'PortalAccess') is null
-    create database PortalAccess;
-go
+CREATE DATABASE CompanyDB;
+GO
 
-use PortalAccess;
-go
-
-
-if object_id(N'dbo.PortalUsers', N'U') is null
-begin
-    create table dbo.PortalUsers
-    (
-        Username  nvarchar(256) not null primary key,
-        Role      nvarchar(20)  not null default N'Member',
-        AddedBy   nvarchar(256) null,
-        AddedOn   datetime2(0)  not null default sysdatetime()
-    );
-end
-go
+USE CompanyDB;
+GO
 
 
-create or alter function dbo.fn_MyRole()
-returns nvarchar(20)
-as
-begin
-    declare @login     sysname = suser_sname();
-    declare @shortName sysname = right(@login, charindex(N'\', reverse(@login) + N'\') - 1);
-    declare @role      nvarchar(20);
+CREATE TABLE Departments (
+    DepartmentID INT PRIMARY KEY,
+    DepartmentName VARCHAR(50)
+);
 
-    select top (1) @role = Role
-    from dbo.PortalUsers
-    where lower(Username) = lower(@login)
-       or (charindex(N'\', Username) = 0 and lower(Username) = lower(@shortName))
-    order by case when Role = N'Admin' then 0 else 1 end;
+CREATE TABLE Employees (
+    EmployeeID INT PRIMARY KEY,
+    EmployeeName VARCHAR(100),
+    Age INT,
+    Salary DECIMAL(10,2),
+    DepartmentID INT,
+    JoiningDate DATE,
+    FOREIGN KEY (DepartmentID)
+        REFERENCES Departments(DepartmentID)
+);
 
-    return @role;
-end
-go
+INSERT INTO Departments VALUES
+(1, 'IT'),
+(2, 'HR'),
+(3, 'Finance'),
+(4, 'Marketing');
 
-
-create or alter procedure dbo.usp_CheckAccess
-as
-begin
-    set nocount on;
-
-    declare @role nvarchar(20) = dbo.fn_MyRole();
-
-    select
-        IsMember = case when @role is not null then 1 else 0 end,
-        IsAdmin  = case when @role = N'Admin'  then 1 else 0 end;
-end
-go
-
-
-create or alter procedure dbo.usp_ListMembers
-as
-begin
-    set nocount on;
-
-    if isnull(dbo.fn_MyRole(), N'') <> N'Admin'
-        throw 50001, N'Only portal admins can do this.', 1;
-
-    select Username, Role, AddedBy, AddedOn
-    from dbo.PortalUsers
-    order by case when Role = N'Admin' then 0 else 1 end, Username;
-end
-go
+INSERT INTO Employees VALUES
+(101, 'Arun', 25, 45000, 1, '2024-01-15'),
+(102, 'Priya', 28, 55000, 1, '2023-06-10'),
+(103, 'Rahul', 30, 40000, 2, '2022-03-20'),
+(104, 'Sneha', 27, 60000, 3, '2021-11-05'),
+(105, 'Vishnu', 24, 35000, 2, '2025-02-01'),
+(106, 'Anjali', 29, 70000, 3, '2020-08-12'),
+(107, 'Akhil', 26, 50000, 1, '2024-09-18'),
+(108, 'Meera', 31, 65000, 4, '2019-05-25');
 
 
-create or alter procedure dbo.usp_SaveMember
-    @Username nvarchar(256),
-    @Role     nvarchar(20)
-as
-begin
-    set nocount on;
 
-    if isnull(dbo.fn_MyRole(), N'') <> N'Admin'
-        throw 50001, N'Only portal admins can do this.', 1;
+SELECT * FROM Employees;
 
-    set @Username = ltrim(rtrim(@Username));
-
-    if @Username = N''
-        throw 50002, N'Enter a Windows username.', 1;
-
-    if @Role not in (N'Admin', N'Member')
-        throw 50003, N'Role must be Admin or Member.', 1;
-
-    declare @login sysname = suser_sname();
-
-    if lower(@Username) = lower(@login) and @Role <> N'Admin'
-        throw 50004, N'You can''t remove your own admin rights.', 1;
-
-    declare @currentRole nvarchar(20) =
-        (select Role from dbo.PortalUsers where lower(Username) = lower(@Username));
-
-    if @currentRole is null
-    begin
-        insert into dbo.PortalUsers (Username, Role, AddedBy)
-        values (@Username, @Role, @login);
-
-        select Result = N'added';
-    end
-    else if @currentRole = @Role
-    begin
-        select Result = N'unchanged';
-    end
-    else
-    begin
-        if @currentRole = N'Admin'
-           and (select count(*) from dbo.PortalUsers where Role = N'Admin') <= 1
-            throw 50005, N'There must be at least one admin.', 1;
-
-        update dbo.PortalUsers
-        set Role = @Role
-        where lower(Username) = lower(@Username);
-
-        select Result = N'updated';
-    end
-end
-go
-
-
-create or alter procedure dbo.usp_RemoveMember
-    @Username nvarchar(256)
-as
-begin
-    set nocount on;
-
-    if isnull(dbo.fn_MyRole(), N'') <> N'Admin'
-        throw 50001, N'Only portal admins can do this.', 1;
-
-    if lower(@Username) = lower(suser_sname())
-        throw 50004, N'You can''t remove yourself.', 1;
-
-    if (select Role from dbo.PortalUsers where lower(Username) = lower(@Username)) = N'Admin'
-       and (select count(*) from dbo.PortalUsers where Role = N'Admin') <= 1
-        throw 50005, N'There must be at least one admin.', 1;
-
-    delete from dbo.PortalUsers
-    where lower(Username) = lower(@Username);
-
-    select Removed = @@rowcount;
-end
-go
-
-
-revoke select, insert, update, delete on dbo.PortalUsers from public;
-
-if database_principal_id(N'PortalAdmins') is not null
-    exec (N'revoke select, insert, update, delete on dbo.PortalUsers from PortalAdmins;');
-
-grant connect to guest;
-
-grant execute on dbo.usp_CheckAccess  to public;
-grant execute on dbo.usp_ListMembers  to public;
-grant execute on dbo.usp_SaveMember   to public;
-grant execute on dbo.usp_RemoveMember to public;
-go
-
-
-declare @login sysname = suser_sname();
-
-if exists (select 1 from dbo.PortalUsers where lower(Username) = lower(@login))
-    update dbo.PortalUsers set Role = N'Admin' where lower(Username) = lower(@login);
-else
-    insert into dbo.PortalUsers (Username, Role, AddedBy) values (@login, N'Admin', N'setup');
-go
-
-
-exec dbo.usp_CheckAccess;
+SELECT * FROM Departments;
