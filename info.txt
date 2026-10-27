@@ -1,151 +1,2458 @@
-CREATE DATABASE DRawDB;
-GO
-USE DRawDB;
-GO
+import os
+import re
+import csv
+import sys
+import time
+import html
+import getpass
+import datetime
+import decimal
+from contextlib import contextmanager
 
-CREATE TABLE Departments (
-    DepartmentID INT PRIMARY KEY,
-    DepartmentName VARCHAR(50)
-);
-
-CREATE TABLE Employees (
-    EmployeeID INT PRIMARY KEY,
-    EmployeeName VARCHAR(100),
-    Age INT,
-    Salary DECIMAL(10,2),
-    DepartmentID INT,
-    JoiningDate DATE,
-    FOREIGN KEY (DepartmentID)
-        REFERENCES Departments(DepartmentID)
-);
-
-INSERT INTO Departments VALUES
-(1, 'IT'),
-(2, 'HR'),
-(3, 'Finance'),
-(4, 'Marketing');
-
-INSERT INTO Employees VALUES
-(101, 'Arun', 25, 45000, 1, '2024-01-15'),
-(102, 'Priya', 28, 55000, 1, '2023-06-10'),
-(103, 'Rahul', 30, 40000, 2, '2022-03-20'),
-(104, 'Sneha', 27, 60000, 3, '2021-11-05'),
-(105, 'Vishnu', 24, 35000, 2, '2025-02-01'),
-(106, 'Anjali', 29, 70000, 3, '2020-08-12'),
-(107, 'Akhil', 26, 50000, 1, '2024-09-18'),
-(108, 'Meera', 31, 65000, 4, '2019-05-25');
-
-SELECT * FROM Employees;
-
-SELECT *
-FROM Employees
-WHERE Salary > 45000;
-
-SELECT *
-FROM Employees
-ORDER BY Salary DESC;
-
-SELECT TOP 3 *
-FROM Employees
-ORDER BY Salary DESC;
-
-SELECT COUNT(*) AS TotalEmployees
-FROM Employees;
-
-SELECT
-    DepartmentID,
-    COUNT(*) AS TotalEmployees,
-    AVG(Salary) AS AverageSalary,
-    SUM(Salary) AS TotalSalary
-FROM Employees
-GROUP BY DepartmentID;
-
-SELECT
-    DepartmentID,
-    AVG(Salary) AS AverageSalary
-FROM Employees
-GROUP BY DepartmentID
-HAVING AVG(Salary) > 45000;
-
-SELECT
-    E.EmployeeName,
-    E.Salary,
-    D.DepartmentName
-FROM Employees E
-INNER JOIN Departments D
-    ON E.DepartmentID = D.DepartmentID;
-
-SELECT
-    D.DepartmentName,
-    E.EmployeeName
-FROM Departments D
-LEFT JOIN Employees E
-    ON D.DepartmentID = E.DepartmentID;
-
-SELECT
-    EmployeeName,
-    Salary,
-    DepartmentID
-FROM Employees E
-WHERE Salary > (
-    SELECT AVG(Salary)
-    FROM Employees
-    WHERE DepartmentID = E.DepartmentID
-);
-
-UPDATE Employees
-SET Salary = 50000
-WHERE EmployeeID = 101;
-
-ALTER TABLE Employees
-ADD Email VARCHAR(100);
-
-UPDATE Employees
-SET Email = 'arun@company.com'
-WHERE EmployeeID = 101;
-
-SELECT
-    EmployeeName,
-    Salary,
-    CASE
-        WHEN Salary >= 60000 THEN 'High Salary'
-        WHEN Salary >= 40000 THEN 'Medium Salary'
-        ELSE 'Low Salary'
-    END AS SalaryCategory
-FROM Employees;
-
-WITH SalaryRanking AS (
-    SELECT
-        EmployeeName,
-        DepartmentID,
-        Salary,
-        DENSE_RANK() OVER (
-            PARTITION BY DepartmentID
-            ORDER BY Salary DESC
-        ) AS SalaryRank
-    FROM Employees
+import pyodbc
+from PySide6.QtCore import Qt, Signal, QPointF, QRectF, QPoint, QSize, QTimer, QSettings, QUrl
+from PySide6.QtGui import (
+    QColor, QPainter, QPen, QPixmap, QIcon, QBrush, QFont, QLinearGradient,
+    QPainterPath, QGuiApplication, QDesktopServices, QKeySequence, QShortcut,
 )
-SELECT *
-FROM SalaryRanking
-WHERE SalaryRank = 1;
-GO
+from PySide6.QtWidgets import (
+    QApplication, QWidget, QMainWindow, QStackedWidget, QFrame, QLabel, QLineEdit,
+    QPushButton, QComboBox, QVBoxLayout, QHBoxLayout, QGridLayout, QListWidget,
+    QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
+    QAbstractItemView, QSizePolicy, QStyledItemDelegate, QStyleOptionViewItem, QStyle,
+    QButtonGroup, QFileDialog,
+)
 
-CREATE VIEW EmployeeDetails AS
-SELECT
-    E.EmployeeID,
-    E.EmployeeName,
-    E.Salary,
-    D.DepartmentName
-FROM Employees E
-INNER JOIN Departments D
-    ON E.DepartmentID = D.DepartmentID;
-GO
 
-SELECT * FROM EmployeeDetails;
+APP_NAME = ""
+APP_TAGLINE = "Search, filter and review project records securely from one place."
+ORG_FOOTER = "· "
+LOGO_FILE = "logo.png"
 
-DELETE FROM Employees
-WHERE EmployeeID = 107;
+ACCESS_DATABASE = "PortalAccess"
+ACCESS_SCHEMA = "dbo"
 
-SELECT * FROM Employees;
+FILTERS = [
+    ("UserName", "User", "Search users..."),
+    ("Class", "Class", "Search classes..."),
+    ("FlagColor", "Flag Color", "Search flag colors..."),
+]
 
-SELECT * FROM Departments;
+RESULT_COLUMNS = [
+    ("UserName", "User"),
+    ("Class", "Class"),
+    ("FlagColor", "Flag Color"),
+    ("Description", "Description"),
+    ("CreatedOn", "Created On"),
+]
+
+SEVERITY_COLUMN = "FlagColor"
+SEVERITY_COLORS = {
+    "Critical": "#DC2626",
+    "Major": "#EA580C",
+    "Moderate": "#EAB308",
+    "Minor": "#2563EB",
+}
+
+MAX_RESULT_ROWS = 10000
+DATE_FORMAT = "%d-%m-%Y %H:%M"
+
+
+def pick_driver():
+    preferred = [
+        "ODBC Driver 18 for SQL Server",
+        "ODBC Driver 17 for SQL Server",
+        "ODBC Driver 13 for SQL Server",
+        "SQL Server Native Client 11.0",
+        "SQL Server",
+    ]
+    installed = pyodbc.drivers()
+    for d in preferred:
+        if d in installed:
+            return d
+    raise RuntimeError(
+        "No SQL Server ODBC driver found. "
+        "Install 'ODBC Driver 18 for SQL Server' from Microsoft and try again."
+    )
+
+
+def db_connect(server, database="master"):
+    driver = pick_driver()
+    db = database.replace("}", "}}")
+    cs = (
+        f"DRIVER={{{driver}}};SERVER={server};DATABASE={{{db}}};"
+        "Trusted_Connection=yes;"
+    )
+    if driver.startswith("ODBC Driver"):
+        cs += "TrustServerCertificate=yes;"
+    return pyodbc.connect(cs, timeout=10, autocommit=True)
+
+
+def q(name):
+    return "[" + str(name).replace("]", "]]") + "]"
+
+
+def proc(name):
+    return f"{q(ACCESS_DATABASE)}.{q(ACCESS_SCHEMA)}.{q(name)}"
+
+
+def sql_msg(e):
+    m = re.search(r"\[SQL Server\]([^\[]+?)\s*\(\d+\)", str(e))
+    return m.group(1).strip() if m else str(e)
+
+
+def fmt_value(v):
+    if v is None:
+        return ""
+    if isinstance(v, datetime.datetime):
+        return v.strftime(DATE_FORMAT)
+    if isinstance(v, datetime.date):
+        return v.strftime(DATE_FORMAT.split(" ")[0])
+    if isinstance(v, decimal.Decimal):
+        return format(v.normalize(), "f")
+    return str(v)
+
+
+def windows_user():
+    user = os.environ.get("USERNAME") or getpass.getuser()
+    dom = os.environ.get("USERDOMAIN", "")
+    return f"{dom}\\{user}" if dom else user
+
+
+def short_name(login):
+    return str(login).split("\\")[-1]
+
+
+def same_user(a, b):
+    a, b = str(a).strip().lower(), str(b).strip().lower()
+    if "\\" in a and "\\" in b:
+        return a == b
+    return short_name(a) == short_name(b)
+
+
+def _settings():
+    return QSettings("DataInsightPortal", "DataInsightPortal")
+
+
+def load_recent_servers():
+    try:
+        value = _settings().value("recent_servers", [])
+    except Exception:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    return [str(v) for v in (value or []) if str(v).strip()][:5]
+
+
+def save_recent_server(server):
+    items = [server] + [s for s in load_recent_servers() if s.lower() != server.lower()]
+    _settings().setValue("recent_servers", items[:5])
+
+
+def clear_recent_servers():
+    _settings().remove("recent_servers")
+
+
+def check_access(conn):
+    row = conn.cursor().execute(f"EXEC {proc('usp_CheckAccess')}").fetchone()
+    return bool(row[0]), bool(row[1])
+
+
+def fetch_members(conn):
+    cur = conn.cursor().execute(f"EXEC {proc('usp_ListMembers')}")
+    return [tuple(r) for r in cur.fetchall()]
+
+
+def save_member(conn, username, role):
+    row = conn.cursor().execute(
+        f"EXEC {proc('usp_SaveMember')} @Username = ?, @Role = ?", username, role
+    ).fetchone()
+    return str(row[0]) if row else "added"
+
+
+def remove_member(conn, username):
+    conn.cursor().execute(f"EXEC {proc('usp_RemoveMember')} @Username = ?", username).fetchall()
+
+
+class AccessDenied(Exception):
+    pass
+
+
+class Session:
+    def __init__(self, server, conn, login, role):
+        self.server = server
+        self.conn = conn
+        self.login = login
+        self.role = role
+
+    @property
+    def is_admin(self):
+        return self.role == "Admin"
+
+    def close(self):
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+
+
+def sign_in(server):
+    conn = db_connect(server, "master")
+
+    login = conn.cursor().execute("SELECT SUSER_SNAME()").fetchone()[0]
+    try:
+        is_member, is_admin = check_access(conn)
+    except pyodbc.Error:
+        conn.close()
+        raise AccessDenied(
+            f"Couldn't check your access in {ACCESS_DATABASE}. "
+            "Ask a portal admin to check the setup."
+        )
+    if is_admin:
+        return Session(server, conn, login, "Admin")
+    if is_member:
+        return Session(server, conn, login, "Member")
+    conn.close()
+    raise AccessDenied(
+        f"{login} doesn't have access to this portal yet. Ask a portal admin to add you."
+    )
+
+
+@contextmanager
+def busy():
+    QApplication.setOverrideCursor(Qt.WaitCursor)
+    try:
+        yield
+    finally:
+        QApplication.restoreOverrideCursor()
+
+
+def severity_color(text):
+    key = str(text or "").strip().lower()
+    for k, v in SEVERITY_COLORS.items():
+        if k.lower() == key:
+            return v
+    return None
+
+
+SEV_RANK = {k.lower(): i for i, k in enumerate(SEVERITY_COLORS)}
+
+
+def mix(c1, c2, t):
+    a, b = QColor(c1), QColor(c2)
+    return QColor(
+        int(a.red() + (b.red() - a.red()) * t),
+        int(a.green() + (b.green() - a.green()) * t),
+        int(a.blue() + (b.blue() - a.blue()) * t),
+    )
+
+
+def repolish(w):
+    w.style().unpolish(w)
+    w.style().polish(w)
+
+
+def _dpr():
+    s = QGuiApplication.primaryScreen()
+    return max(2.0, s.devicePixelRatio() if s else 1.0)
+
+
+def make_pix(kind, color="#64748B", size=18):
+    r = _dpr()
+    pm = QPixmap(int(size * r), int(size * r))
+    pm.setDevicePixelRatio(r)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    s = size
+    pen = QPen(QColor(color))
+    pen.setWidthF(max(1.5, s / 11))
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+
+    def P(x, y):
+        return QPointF(s * x, s * y)
+
+    def R(x, y, w, h):
+        return QRectF(s * x, s * y, s * w, s * h)
+
+    if kind == "search":
+        p.drawEllipse(R(.14, .14, .54, .54))
+        p.drawLine(P(.62, .62), P(.86, .86))
+    elif kind == "chevron":
+        p.drawPolyline([P(.28, .4), P(.5, .62), P(.72, .4)])
+    elif kind == "refresh":
+        p.drawArc(R(.18, .18, .64, .64), 40 * 16, 280 * 16)
+        p.drawLine(P(.745, .294), P(.765, .094))
+        p.drawLine(P(.745, .294), P(.555, .254))
+    elif kind == "user":
+        p.drawEllipse(R(.34, .12, .32, .32))
+        p.drawArc(R(.18, .56, .64, .6), 0, 180 * 16)
+    elif kind == "users":
+        p.drawEllipse(R(.14, .2, .3, .3))
+        p.drawArc(R(.04, .6, .5, .5), 0, 180 * 16)
+        p.drawEllipse(R(.58, .2, .26, .26))
+        p.drawArc(R(.6, .56, .36, .44), 0, 180 * 16)
+    elif kind == "lock":
+        p.drawRoundedRect(R(.22, .46, .56, .4), s * .08, s * .08)
+        p.drawArc(R(.33, .16, .34, .5), 0, 180 * 16)
+        p.drawLine(P(.33, .41), P(.33, .46))
+        p.drawLine(P(.67, .41), P(.67, .46))
+    elif kind == "server":
+        for y in (.16, .54):
+            p.drawRoundedRect(R(.14, y, .72, .3), s * .06, s * .06)
+            p.drawPoint(P(.3, y + .15))
+    elif kind == "database":
+        p.drawEllipse(R(.2, .12, .6, .2))
+        p.drawLine(P(.2, .22), P(.2, .78))
+        p.drawLine(P(.8, .22), P(.8, .78))
+        p.drawArc(R(.2, .68, .6, .2), 180 * 16, 180 * 16)
+        p.drawArc(R(.2, .4, .6, .2), 180 * 16, 180 * 16)
+    elif kind == "table":
+        p.drawRoundedRect(R(.14, .18, .72, .64), s * .08, s * .08)
+        p.drawLine(P(.14, .4), P(.86, .4))
+        p.drawLine(P(.42, .4), P(.42, .82))
+    elif kind == "dashboard":
+        for x, y, w, h in ((.14, .14, .32, .4), (.54, .14, .32, .24),
+                           (.14, .62, .32, .24), (.54, .46, .32, .4)):
+            p.drawRoundedRect(R(x, y, w, h), s * .06, s * .06)
+    elif kind == "logout":
+        p.drawPolyline([P(.46, .16), P(.18, .16), P(.18, .84), P(.46, .84)])
+        p.drawLine(P(.4, .5), P(.86, .5))
+        p.drawPolyline([P(.7, .34), P(.86, .5), P(.7, .66)])
+    elif kind == "plus":
+        p.drawLine(P(.5, .2), P(.5, .8))
+        p.drawLine(P(.2, .5), P(.8, .5))
+    elif kind == "trash":
+        p.drawLine(P(.18, .28), P(.82, .28))
+        p.drawLine(P(.4, .16), P(.6, .16))
+        p.drawPolyline([P(.26, .28), P(.32, .86), P(.68, .86), P(.74, .28)])
+    elif kind == "x":
+        p.drawLine(P(.28, .28), P(.72, .72))
+        p.drawLine(P(.72, .28), P(.28, .72))
+    elif kind == "check":
+        p.drawPolyline([P(.2, .52), P(.42, .72), P(.8, .3)])
+    elif kind == "filter":
+        p.drawPolygon([P(.14, .2), P(.86, .2), P(.58, .52), P(.58, .82), P(.42, .74), P(.42, .52)])
+    elif kind == "shield":
+        path = QPainterPath(P(.5, .1))
+        path.lineTo(P(.82, .22))
+        path.cubicTo(P(.82, .56), P(.7, .78), P(.5, .9))
+        path.cubicTo(P(.3, .78), P(.18, .56), P(.18, .22))
+        path.closeSubpath()
+        p.drawPath(path)
+        p.drawPolyline([P(.36, .5), P(.46, .6), P(.64, .4)])
+    elif kind == "alert":
+        p.drawEllipse(R(.12, .12, .76, .76))
+        p.drawLine(P(.5, .3), P(.5, .54))
+        p.drawPoint(P(.5, .7))
+    elif kind == "info":
+        p.drawEllipse(R(.12, .12, .76, .76))
+        p.drawLine(P(.5, .46), P(.5, .7))
+        p.drawPoint(P(.5, .32))
+    elif kind == "swap":
+        p.drawLine(P(.18, .34), P(.82, .34))
+        p.drawPolyline([P(.66, .18), P(.82, .34), P(.66, .5)])
+        p.drawLine(P(.82, .66), P(.18, .66))
+        p.drawPolyline([P(.34, .5), P(.18, .66), P(.34, .82)])
+    elif kind == "copy":
+        p.drawRoundedRect(R(.34, .3, .48, .56), s * .08, s * .08)
+        p.drawPolyline([P(.22, .66), P(.18, .66), P(.18, .14), P(.62, .14), P(.62, .2)])
+    elif kind == "download":
+        p.drawLine(P(.5, .14), P(.5, .62))
+        p.drawPolyline([P(.3, .44), P(.5, .64), P(.7, .44)])
+        p.drawPolyline([P(.16, .66), P(.16, .84), P(.84, .84), P(.84, .66)])
+    elif kind == "logo":
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("white"))
+        p.drawRoundedRect(R(0, 0, 1, 1), s * .26, s * .26)
+        for (x, h), col in zip(((.22, .24), (.43, .40), (.64, .54)),
+                               ("#00A3E0", "#0079B0", "#005587")):
+            p.setBrush(QColor(col))
+            p.drawRoundedRect(R(x, .76 - h, .14, h), s * .05, s * .05)
+    p.end()
+    return pm
+
+
+def make_icon(kind, color="#64748B", size=18, checked_color=None):
+    ic = QIcon()
+    ic.addPixmap(make_pix(kind, color, size), QIcon.Normal, QIcon.Off)
+    if checked_color:
+        ic.addPixmap(make_pix(kind, checked_color, size), QIcon.Normal, QIcon.On)
+    return ic
+
+
+AVATAR_COLORS = ["#00A3E0", "#7C3AED", "#0891B2", "#059669", "#D97706", "#DB2777"]
+
+
+def initials(login):
+    parts = [x for x in re.split(r"[.\s_\-]+", short_name(login)) if x]
+    if not parts:
+        return "?"
+    return (parts[0][0] + (parts[1][0] if len(parts) > 1 else "")).upper()
+
+
+def make_avatar(login, size=36):
+    r = _dpr()
+    pm = QPixmap(int(size * r), int(size * r))
+    pm.setDevicePixelRatio(r)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    color = AVATAR_COLORS[sum(map(ord, str(login).lower())) % len(AVATAR_COLORS)]
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(color))
+    p.drawEllipse(QRectF(0, 0, size, size))
+    f = QFont("Segoe UI")
+    f.setPixelSize(int(size * .38))
+    f.setBold(True)
+    p.setFont(f)
+    p.setPen(QColor("white"))
+    p.drawText(QRectF(0, 0, size, size), Qt.AlignCenter, initials(login))
+    p.end()
+    return pm
+
+
+def make_empty_illustration(size=140):
+    r = _dpr()
+    pm = QPixmap(int(size * r), int(size * r))
+    pm.setDevicePixelRatio(r)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    s = size
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor("#E6F6FC"))
+    p.drawEllipse(QRectF(s * .05, s * .05, s * .8, s * .8))
+    p.setBrush(QColor("white"))
+    p.setPen(QPen(QColor("#94A3B8"), 2))
+    p.drawRoundedRect(QRectF(s * .27, s * .2, s * .36, s * .46), 4, 4)
+    p.setPen(QPen(QColor("#CBD5E1"), 2.4))
+    for i in range(4):
+        y = s * (.3 + i * .08)
+        p.drawLine(QPointF(s * .34, y), QPointF(s * .55, y))
+    p.setBrush(QColor("#E6F6FC"))
+    p.setPen(QPen(QColor("#1E293B"), 4))
+    p.drawEllipse(QRectF(s * .5, s * .5, s * .2, s * .2))
+    pen = QPen(QColor("#00A3E0"), 5)
+    pen.setCapStyle(Qt.RoundCap)
+    p.setPen(pen)
+    p.drawLine(QPointF(s * .68, s * .68), QPointF(s * .78, s * .78))
+    p.end()
+    return pm
+
+
+def app_dir():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def brand_logo(width):
+    h = round(width * 392 / 1024)
+    lbl = QLabel()
+    lbl.setFixedSize(width, h)
+    lbl.setAlignment(Qt.AlignCenter)
+    path = LOGO_FILE if os.path.isabs(LOGO_FILE) else os.path.join(app_dir(), LOGO_FILE)
+    pm = QPixmap(path) if os.path.exists(path) else QPixmap()
+    if not pm.isNull():
+        r = _dpr()
+        pm = pm.scaled(int(width * r), int(h * r), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        pm.setDevicePixelRatio(r)
+        lbl.setPixmap(pm)
+    else:
+        lbl.setObjectName("logoSlot")
+        lbl.setText("Your logo here\n1024 × 392")
+        lbl.setToolTip(f"Save your logo as: {path}")
+    return lbl
+
+
+def label(text, obj):
+    l = QLabel(text)
+    l.setObjectName(obj)
+    return l
+
+
+def card():
+    c = QFrame()
+    c.setObjectName("card")
+    return c
+
+
+class Banner(QFrame):
+    ICONS = {"error": ("alert", "#B91C1C"), "success": ("check", "#15803D"), "info": ("info", "#005587")}
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("banner")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(10)
+        self.icon = QLabel()
+        self.icon.setFixedWidth(18)
+        self.icon.setAlignment(Qt.AlignTop)
+        self.text = QLabel()
+        self.text.setObjectName("bannerText")
+        self.text.setWordWrap(True)
+        self.text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(self.icon)
+        lay.addWidget(self.text, 1)
+        self.hide()
+
+    def show_msg(self, text, kind="error"):
+        self.setProperty("kind", kind)
+        kind_icon, col = self.ICONS.get(kind, self.ICONS["info"])
+        self.icon.setPixmap(make_pix(kind_icon, col, 18))
+        self.text.setText(text)
+        repolish(self)
+        repolish(self.text)
+        self.show()
+
+
+VALUE_ROLE = Qt.UserRole
+CHECK_ROLE = Qt.UserRole + 1
+
+
+class DropdownDelegate(QStyledItemDelegate):
+    def __init__(self, dd):
+        super().__init__(dd)
+        self.dd = dd
+
+    def sizeHint(self, opt, idx):
+        return QSize(opt.rect.width(), 38)
+
+    def paint(self, p, opt, idx):
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(opt.rect).adjusted(4, 1, -4, -1)
+        checked = bool(idx.data(CHECK_ROLE))
+        hover = bool(opt.state & QStyle.State_MouseOver)
+        bg = "#E6F6FC" if checked else ("#F1F5F9" if hover else None)
+        if bg:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(bg))
+            p.drawRoundedRect(r, 6, 6)
+
+        x = r.left() + 10
+        if self.dd.multi:
+            box = QRectF(x, r.center().y() - 9, 18, 18)
+            if checked:
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor("#00A3E0"))
+                p.drawRoundedRect(box, 4, 4)
+                pen = QPen(QColor("white"), 2)
+                pen.setCapStyle(Qt.RoundCap)
+                pen.setJoinStyle(Qt.RoundJoin)
+                p.setPen(pen)
+                p.drawPolyline([QPointF(box.x() + 4.5, box.y() + 9.5),
+                                QPointF(box.x() + 7.8, box.y() + 12.8),
+                                QPointF(box.x() + 13.5, box.y() + 6)])
+            else:
+                p.setPen(QPen(QColor("#CBD5E1"), 1.5))
+                p.setBrush(QColor("white"))
+                p.drawRoundedRect(box, 4, 4)
+            x += 28
+
+        text = idx.data(Qt.DisplayRole) or ""
+        color = severity_color(text) if self.dd.show_colors else None
+        if color:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(color))
+            p.drawEllipse(QRectF(x, r.center().y() - 4.5, 9, 9))
+            x += 18
+
+        right = r.right() - 10
+        if not self.dd.multi and checked:
+            p.drawPixmap(int(right - 16), int(r.center().y() - 8), make_pix("check", "#00A3E0", 16))
+            right -= 24
+
+        f = QFont(opt.font)
+        if checked:
+            f.setWeight(QFont.DemiBold)
+        p.setFont(f)
+        p.setPen(QColor("#0F172A"))
+        tr = QRectF(x, r.top(), max(10, right - x), r.height())
+        p.drawText(tr, Qt.AlignVCenter | Qt.AlignLeft,
+                   p.fontMetrics().elidedText(text, Qt.ElideRight, int(tr.width())))
+        p.restore()
+
+
+class _Popup(QFrame):
+    closed = Signal()
+
+    def __init__(self, parent):
+        super().__init__(parent, Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self.closed.emit()
+
+
+class SearchDropdown(QFrame):
+    selectionChanged = Signal()
+
+    def __init__(self, placeholder, multi=True, icon_kind="search", show_colors=False, parent=None):
+        super().__init__(parent)
+        self.setObjectName("ddField")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFixedHeight(44)
+        self.multi = multi
+        self.placeholder = placeholder
+        self.show_colors = show_colors
+        self.options = []
+        self.selected = set()
+        self._last_close = 0.0
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 0, 12, 0)
+        lay.setSpacing(10)
+        ic = QLabel()
+        ic.setPixmap(make_pix(icon_kind, "#94A3B8", 18))
+        self.text_lbl = label("", "ddText")
+        self.text_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.badge = label("", "ddBadge")
+        self.badge.setAlignment(Qt.AlignCenter)
+        self.badge.setFixedHeight(20)
+        self.badge.setMinimumWidth(20)
+        self.badge.hide()
+        chev = QLabel()
+        chev.setPixmap(make_pix("chevron", "#64748B", 16))
+        lay.addWidget(ic)
+        lay.addWidget(self.text_lbl, 1)
+        lay.addWidget(self.badge, 0, Qt.AlignVCenter)
+        lay.addWidget(chev)
+
+        self.popup = _Popup(self)
+        outer = QVBoxLayout(self.popup)
+        outer.setContentsMargins(0, 0, 0, 0)
+        panel = QFrame()
+        panel.setObjectName("ddPopup")
+        pl = QVBoxLayout(panel)
+        pl.setContentsMargins(8, 8, 8, 8)
+        pl.setSpacing(6)
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setObjectName("ddSearch")
+        self.search_edit.setPlaceholderText(
+            "Type or paste values (comma / space separated), then Enter" if multi else "Search..."
+        )
+        self.search_edit.addAction(make_icon("search", "#94A3B8", 16), QLineEdit.LeadingPosition)
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.textChanged.connect(self._apply_filter)
+        self.search_edit.returnPressed.connect(self._on_enter)
+
+        self.hint = label("", "ddHint")
+        self.hint.setWordWrap(True)
+        self.hint.hide()
+
+        self.list = QListWidget()
+        self.list.setObjectName("ddList")
+        self.list.setItemDelegate(DropdownDelegate(self))
+        self.list.setMouseTracking(True)
+        self.list.setSelectionMode(QAbstractItemView.NoSelection)
+        self.list.setFocusPolicy(Qt.NoFocus)
+        self.list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list.itemClicked.connect(self._on_click)
+
+        self.empty_lbl = label("No matches", "ddEmpty")
+        self.empty_lbl.setAlignment(Qt.AlignCenter)
+        self.empty_lbl.hide()
+
+        pl.addWidget(self.search_edit)
+        pl.addWidget(self.hint)
+        pl.addWidget(self.list)
+        pl.addWidget(self.empty_lbl)
+
+        if multi:
+            foot = QHBoxLayout()
+            foot.setContentsMargins(4, 2, 0, 0)
+            sel_all = QPushButton("Select shown")
+            sel_all.setObjectName("link")
+            sel_all.setCursor(Qt.PointingHandCursor)
+            sel_all.clicked.connect(self._select_visible)
+            clr = QPushButton("Clear")
+            clr.setObjectName("link")
+            clr.setCursor(Qt.PointingHandCursor)
+            clr.clicked.connect(self._clear_clicked)
+            done = QPushButton("Done")
+            done.setObjectName("smallPrimary")
+            done.setCursor(Qt.PointingHandCursor)
+            done.clicked.connect(self.popup.hide)
+            foot.addWidget(sel_all)
+            foot.addSpacing(12)
+            foot.addWidget(clr)
+            foot.addStretch(1)
+            foot.addWidget(done)
+            pl.addLayout(foot)
+
+        outer.addWidget(panel)
+        self.popup.closed.connect(self._on_closed)
+        self._update_text()
+
+    def set_options(self, values):
+        if self.show_colors:
+            new = sorted(values, key=lambda v: (SEV_RANK.get(fmt_value(v).strip().lower(), 99),
+                                                fmt_value(v).lower()))
+        else:
+            new = sorted(values, key=lambda v: fmt_value(v).lower())
+        old_sel = set(self.selected)
+        self.selected &= set(new)
+        if new == self.options:
+            self._sync_checks()
+        else:
+            self.options = new
+            self._rebuild()
+        self._update_text()
+        return self.selected != old_sel
+
+    def value(self):
+        return next(iter(self.selected), None)
+
+    def selected_in_order(self):
+        return [v for v in self.options if v in self.selected]
+
+    def clear_selection(self):
+        self.selected.clear()
+        self._sync_checks()
+        self._update_text()
+
+    def _rebuild(self):
+        sb = self.list.verticalScrollBar().value()
+        self.list.clear()
+        for i, v in enumerate(self.options):
+            it = QListWidgetItem(fmt_value(v))
+            it.setData(VALUE_ROLE, i)
+            it.setData(CHECK_ROLE, v in self.selected)
+            it.setFlags(Qt.ItemIsEnabled)
+            self.list.addItem(it)
+        self._apply_filter(self.search_edit.text(), keep_hint=True)
+        self.list.verticalScrollBar().setValue(sb)
+
+    def _sync_checks(self):
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            it.setData(CHECK_ROLE, self.options[it.data(VALUE_ROLE)] in self.selected)
+
+    def _is_list_input(self, text):
+        t = text.strip()
+        return self.multi and bool(t) and (bool(re.search(r"[,;]", t)) or len(t.split()) > 1)
+
+    def _parse(self, text):
+        by_text = {}
+        for i, v in enumerate(self.options):
+            by_text.setdefault(fmt_value(v).strip().lower(), i)
+
+        def partial(word):
+            hits = [i for i, v in enumerate(self.options) if word.lower() in fmt_value(v).lower()]
+            return hits[0] if len(hits) == 1 else None
+
+        def greedy(words):
+            found, missing, i = [], [], 0
+            while i < len(words):
+                for j in range(len(words), i, -1):
+                    phrase = " ".join(words[i:j]).lower()
+                    if phrase in by_text:
+                        found.append(by_text[phrase])
+                        i = j
+                        break
+                else:
+                    missing.append(words[i])
+                    i += 1
+            return found, missing
+
+        found, missing = [], []
+        for part in [p.strip() for p in re.split(r"[,;\t\r\n]+", text) if p.strip()]:
+            if part.lower() in by_text:
+                found.append(by_text[part.lower()])
+                continue
+            f, m = greedy(part.split())
+            found += f
+            for word in m:
+                hit = partial(word) if len(word) > 1 else None
+                if hit is not None:
+                    found.append(hit)
+                else:
+                    missing.append(word)
+        return list(dict.fromkeys(found)), list(dict.fromkeys(missing))
+
+    @staticmethod
+    def _missing_text(missing):
+        return "  ·  Not found: " + ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
+
+    def _apply_filter(self, text, keep_hint=False):
+        list_mode = self._is_list_input(text)
+        found_set = set(self._parse(text)[0]) if list_mode else None
+        t = text.strip().lower()
+        visible = 0
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            if list_mode:
+                show = it.data(VALUE_ROLE) in found_set
+            else:
+                show = not t or t in it.text().lower()
+            it.setHidden(not show)
+            visible += show
+        self.empty_lbl.setText("No matching items" if t else "No options available")
+        self.empty_lbl.setVisible(visible == 0)
+        self.list.setVisible(visible > 0)
+        if list_mode:
+            found, missing = self._parse(text)
+            msg = f"Press Enter to select {len(found)} item(s)"
+            if missing:
+                msg += self._missing_text(missing)
+            self._show_hint(msg, error=bool(missing) and not found)
+        elif t and self.multi:
+            self._show_hint("Press Enter to select the matching item")
+        elif not keep_hint:
+            self.hint.hide()
+            self._fit_popup()
+
+    def _show_hint(self, msg, error=False):
+        self.hint.setText(msg)
+        self.hint.setProperty("error", error)
+        repolish(self.hint)
+        self.hint.show()
+        self._fit_popup()
+
+    def _reset_search(self):
+        self.search_edit.blockSignals(True)
+        self.search_edit.clear()
+        self.search_edit.blockSignals(False)
+        self._apply_filter("", keep_hint=True)
+
+    def _emit_changed(self):
+        QTimer.singleShot(0, self.selectionChanged.emit)
+
+    def _on_enter(self):
+        text = self.search_edit.text()
+        vis = [self.list.item(i) for i in range(self.list.count()) if not self.list.item(i).isHidden()]
+        if not self.multi:
+            if vis:
+                self._on_click(vis[0])
+            return
+        if not text.strip():
+            return
+        found, missing = self._parse(text)
+        if not found and len(vis) == 1:
+            found, missing = [vis[0].data(VALUE_ROLE)], []
+        if not found:
+            msg = "No matching items" if not vis else "Several items match - type more, or click to pick"
+            self._show_hint(msg, error=True)
+            return
+        for i in found:
+            self.selected.add(self.options[i])
+        self._reset_search()
+        msg = f"Selected {len(found)} item(s)"
+        if missing:
+            msg += self._missing_text(missing)
+        self._show_hint(msg, error=bool(missing))
+        self._sync_checks()
+        self._update_text()
+        self._emit_changed()
+
+    def _on_click(self, item):
+        v = self.options[item.data(VALUE_ROLE)]
+        if self.multi:
+            if v in self.selected:
+                self.selected.discard(v)
+            else:
+                self.selected.add(v)
+            item.setData(CHECK_ROLE, v in self.selected)
+            self._update_text()
+            self._emit_changed()
+        else:
+            self.selected = {v}
+            self._sync_checks()
+            self._update_text()
+            self.popup.hide()
+            self._emit_changed()
+
+    def _select_visible(self):
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            if not it.isHidden():
+                self.selected.add(self.options[it.data(VALUE_ROLE)])
+        self._sync_checks()
+        self._update_text()
+        self._emit_changed()
+
+    def _clear_clicked(self):
+        self.clear_selection()
+        self.hint.hide()
+        self._emit_changed()
+
+    def _update_text(self):
+        sel = self.selected_in_order()
+        if not sel:
+            text = self.placeholder
+            self.text_lbl.setProperty("placeholder", True)
+            self.badge.hide()
+        else:
+            text = ", ".join(fmt_value(v) for v in sel)
+            self.text_lbl.setProperty("placeholder", False)
+            if self.multi and len(sel) > 1:
+                self.badge.setText(str(len(sel)))
+                self.badge.show()
+            else:
+                self.badge.hide()
+        repolish(self.text_lbl)
+        fm = self.text_lbl.fontMetrics()
+        w = max(40, self.text_lbl.width())
+        self.text_lbl.setText(fm.elidedText(text, Qt.ElideRight, w))
+        self.text_lbl.setToolTip(text if sel else "")
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._update_text()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            if time.monotonic() - self._last_close < 0.25:
+                return
+            self.open_popup()
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Down):
+            self.open_popup()
+        else:
+            super().keyPressEvent(e)
+
+    def _fit_popup(self):
+        if self.popup.isVisible():
+            self.popup.adjustSize()
+
+    def open_popup(self):
+        self.setProperty("open", True)
+        repolish(self)
+        rows = min(max(self.list.count(), 1), 7)
+        self.list.setFixedHeight(rows * 38 + 6)
+        self.popup.setFixedWidth(max(self.width(), 260))
+        self.hint.hide()
+        self.search_edit.clear()
+        self._apply_filter("")
+        self.popup.adjustSize()
+        pos = self.mapToGlobal(QPoint(0, self.height() + 6))
+        scr = self.screen().availableGeometry()
+        if pos.y() + self.popup.height() > scr.bottom():
+            pos = self.mapToGlobal(QPoint(0, -self.popup.height() - 6))
+        self.popup.move(pos)
+        self.popup.show()
+        self.search_edit.setFocus()
+
+    def _on_closed(self):
+        self._last_close = time.monotonic()
+        self.setProperty("open", False)
+        repolish(self)
+
+
+SORT_ROLE = Qt.UserRole + 10
+ROW_ROLE = Qt.UserRole + 11
+
+
+class SortItem(QTableWidgetItem):
+    def __lt__(self, other):
+        a, b = self.data(SORT_ROLE), other.data(SORT_ROLE)
+        try:
+            return a < b
+        except TypeError:
+            return self.text().lower() < other.text().lower()
+
+
+def sort_key(v, is_sev):
+    if v is None:
+        return [1, ""]
+    if is_sev:
+        r = SEV_RANK.get(str(v).strip().lower())
+        return [0, r if r is not None else 99, str(v).lower()]
+    if isinstance(v, bool):
+        return [0, int(v)]
+    if isinstance(v, (int, float, decimal.Decimal)):
+        return [0, float(v)]
+    if isinstance(v, (datetime.date, datetime.datetime)):
+        return [0, v.isoformat()]
+    return [0, str(v).lower()]
+
+
+class SeverityDelegate(QStyledItemDelegate):
+    def paint(self, p, opt, idx):
+        text = idx.data(Qt.DisplayRole) or ""
+        color = severity_color(text)
+        if not color:
+            return super().paint(p, opt, idx)
+        o = QStyleOptionViewItem(opt)
+        self.initStyleOption(o, idx)
+        o.text = ""
+        style = o.widget.style() if o.widget else QApplication.style()
+        style.drawControl(QStyle.CE_ItemViewItem, o, p, o.widget)
+
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing)
+        f = QFont(opt.font)
+        f.setWeight(QFont.DemiBold)
+        f.setPixelSize(12)
+        p.setFont(f)
+        fm = p.fontMetrics()
+        w = min(fm.horizontalAdvance(text) + 34, opt.rect.width() - 20)
+        h = 24
+        r = QRectF(opt.rect.x() + 14, opt.rect.center().y() - h / 2 + 1, w, h)
+        p.setPen(Qt.NoPen)
+        p.setBrush(mix(color, "#FFFFFF", .86))
+        p.drawRoundedRect(r, h / 2, h / 2)
+        p.setBrush(QColor(color))
+        p.drawEllipse(QRectF(r.x() + 10, r.center().y() - 3.5, 7, 7))
+        p.setPen(mix(color, "#000000", .38))
+        p.drawText(r.adjusted(24, 0, -8, 0), Qt.AlignVCenter | Qt.AlignLeft,
+                   fm.elidedText(text, Qt.ElideRight, int(r.width() - 32)))
+        p.restore()
+
+
+def make_table(headers):
+    t = QTableWidget(0, len(headers))
+    t.setHorizontalHeaderLabels(headers)
+    hh = t.horizontalHeader()
+    hh.setSectionResizeMode(QHeaderView.Stretch)
+    hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    hh.setHighlightSections(False)
+    hh.setFixedHeight(42)
+    t.verticalHeader().setVisible(False)
+    t.verticalHeader().setDefaultSectionSize(44)
+    t.setEditTriggers(QAbstractItemView.NoEditTriggers)
+    t.setSelectionBehavior(QAbstractItemView.SelectRows)
+    t.setAlternatingRowColors(True)
+    t.setShowGrid(False)
+    t.setFocusPolicy(Qt.NoFocus)
+    t.setWordWrap(False)
+    return t
+
+
+class BrandPanel(QWidget):
+    FEATURES = [
+        ("shield", "Windows sign-in", "No passwords to type or store."),
+        ("users", "Role-based access", "Only members added by an admin can enter."),
+        ("lock", "Read-only by design", "Your data stays on your own network."),
+    ]
+
+    def __init__(self):
+        super().__init__()
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(56, 48, 56, 40)
+        lay.setSpacing(0)
+
+        top = QHBoxLayout()
+        top.setSpacing(12)
+        logo = QLabel()
+        logo.setPixmap(make_pix("logo", size=40))
+        top.addWidget(logo)
+        top.addWidget(label(APP_NAME, "brandName"))
+        top.addStretch(1)
+        lay.addLayout(top)
+        lay.addStretch(2)
+
+        head = label("Secure access to\nyour project data", "brandHeadline")
+        lay.addWidget(head)
+        lay.addSpacing(14)
+        sub = label(APP_TAGLINE, "brandSub")
+        sub.setWordWrap(True)
+        sub.setMaximumWidth(460)
+        lay.addWidget(sub)
+        lay.addSpacing(36)
+
+        for kind, title, text in self.FEATURES:
+            row = QHBoxLayout()
+            row.setSpacing(14)
+            ib = QLabel()
+            ib.setObjectName("featIcon")
+            ib.setFixedSize(40, 40)
+            ib.setAlignment(Qt.AlignCenter)
+            ib.setPixmap(make_pix(kind, "#FFFFFF", 20))
+            col = QVBoxLayout()
+            col.setSpacing(2)
+            col.addWidget(label(title, "featTitle"))
+            col.addWidget(label(text, "featText"))
+            row.addWidget(ib)
+            row.addLayout(col)
+            row.addStretch(1)
+            lay.addLayout(row)
+            lay.addSpacing(18)
+
+        lay.addStretch(3)
+        lay.addWidget(label(ORG_FOOTER, "brandFoot"))
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        g = QLinearGradient(0, 0, w, h)
+        g.setColorAt(0, QColor("#003A5D"))
+        g.setColorAt(.5, QColor("#005587"))
+        g.setColorAt(1, QColor("#00A3E0"))
+        p.fillRect(self.rect(), g)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255, 14))
+        p.drawEllipse(QPointF(w * .98, h * .1), 230, 230)
+        p.setBrush(QColor(255, 255, 255, 10))
+        p.drawEllipse(QPointF(w * .02, h * .98), 270, 270)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(255, 255, 255, 28), 1.2))
+        p.drawEllipse(QPointF(w * .9, h * .78), 140, 140)
+        p.drawEllipse(QPointF(w * .9, h * .78), 200, 200)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255, 40))
+        for i in range(8):
+            for j in range(6):
+                p.drawEllipse(QPointF(w - 230 + i * 22, 110 + j * 22), 1.6, 1.6)
+
+
+class LoginPage(QWidget):
+    opened = Signal(object, object, str, str, str)
+
+    def __init__(self):
+        super().__init__()
+        self.session = None
+        self.table_map = {}
+
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        root.addWidget(BrandPanel(), 5)
+
+        side = QWidget()
+        side.setObjectName("formSide")
+        side.setAttribute(Qt.WA_StyledBackground, True)
+        sl = QVBoxLayout(side)
+        sl.setContentsMargins(48, 40, 48, 28)
+        sl.addStretch(1)
+
+        box = QWidget()
+        box.setFixedWidth(420)
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(0)
+        self.step_lbl = label("", "stepLabel")
+        self.title_lbl = label("", "loginTitle")
+        self.sub_lbl = label("", "loginSub")
+        self.sub_lbl.setWordWrap(True)
+        bl.addWidget(brand_logo(230), 0, Qt.AlignHCenter)
+        bl.addSpacing(30)
+        bl.addWidget(self.step_lbl)
+        bl.addSpacing(8)
+        bl.addWidget(self.title_lbl)
+        bl.addSpacing(6)
+        bl.addWidget(self.sub_lbl)
+        bl.addSpacing(28)
+        self.step1 = self._build_step1()
+        self.step2 = self._build_step2()
+        bl.addWidget(self.step1)
+        bl.addWidget(self.step2)
+
+        center = QHBoxLayout()
+        center.addStretch(1)
+        center.addWidget(box)
+        center.addStretch(1)
+        sl.addLayout(center)
+        sl.addStretch(1)
+        foot = label(f"{APP_NAME}  ·  {ORG_FOOTER}", "formFoot")
+        foot.setAlignment(Qt.AlignCenter)
+        sl.addWidget(foot)
+        root.addWidget(side, 6)
+
+        self._goto(0)
+
+    def _field_label(self, text):
+        l = label(text, "fieldLabel")
+        return l
+
+    def _build_step1(self):
+        w = QWidget()
+        l = QVBoxLayout(w)
+        l.setContentsMargins(0, 0, 0, 0)
+        l.setSpacing(0)
+
+        user = windows_user()
+        l.addWidget(self._field_label("Windows account"))
+        l.addSpacing(6)
+        idbox = QFrame()
+        idbox.setObjectName("identity")
+        il = QHBoxLayout(idbox)
+        il.setContentsMargins(12, 10, 14, 10)
+        il.setSpacing(12)
+        av = QLabel()
+        av.setPixmap(make_avatar(user, 36))
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        col.addWidget(label(short_name(user), "idName"))
+        col.addWidget(label(f"{user}  ·  detected automatically", "idSub"))
+        lock = QLabel()
+        lock.setPixmap(make_pix("lock", "#94A3B8", 16))
+        lock.setToolTip("Taken from your Windows login - can't be changed")
+        il.addWidget(av)
+        il.addLayout(col, 1)
+        il.addWidget(lock)
+        l.addWidget(idbox)
+        l.addSpacing(18)
+
+        l.addWidget(self._field_label("SQL Server"))
+        l.addSpacing(6)
+        self.server_edit = QLineEdit()
+        self.server_edit.setPlaceholderText(r"e.g. SERVERNAME\INSTANCE")
+        self.server_edit.addAction(make_icon("server", "#94A3B8", 18), QLineEdit.LeadingPosition)
+        self.server_edit.returnPressed.connect(self._sign_in)
+        l.addWidget(self.server_edit)
+        l.addSpacing(8)
+        self.recent_box = QWidget()
+        self.recent_lay = QHBoxLayout(self.recent_box)
+        self.recent_lay.setContentsMargins(0, 0, 0, 0)
+        self.recent_lay.setSpacing(6)
+        l.addWidget(self.recent_box)
+        self._refresh_recent()
+        recent = load_recent_servers()
+        if recent:
+            self.server_edit.setText(recent[0])
+        l.addSpacing(8)
+        self.err1 = Banner()
+        l.addWidget(self.err1)
+        l.addSpacing(12)
+
+        self.signin_btn = QPushButton("Sign in")
+        self.signin_btn.setObjectName("primary")
+        self.signin_btn.setCursor(Qt.PointingHandCursor)
+        self.signin_btn.setMinimumHeight(46)
+        self.signin_btn.clicked.connect(self._sign_in)
+        l.addWidget(self.signin_btn)
+        l.addSpacing(16)
+
+        note = QHBoxLayout()
+        note.setSpacing(8)
+        ni = QLabel()
+        ni.setPixmap(make_pix("shield", "#94A3B8", 16))
+        nt = label("You're signed in with your Windows credentials. "
+                   "Access is checked against the portal member list.", "note")
+        nt.setWordWrap(True)
+        note.addWidget(ni, 0, Qt.AlignTop)
+        note.addWidget(nt, 1)
+        l.addLayout(note)
+        return w
+
+    def _build_step2(self):
+        w = QWidget()
+        l = QVBoxLayout(w)
+        l.setContentsMargins(0, 0, 0, 0)
+        l.setSpacing(0)
+
+        chip = QFrame()
+        chip.setObjectName("sessionChip")
+        cl = QHBoxLayout(chip)
+        cl.setContentsMargins(12, 10, 14, 10)
+        cl.setSpacing(12)
+        self.s2_avatar = QLabel()
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        name_row = QHBoxLayout()
+        name_row.setSpacing(8)
+        self.s2_name = label("", "idName")
+        self.s2_role = label("", "roleBadge")
+        name_row.addWidget(self.s2_name)
+        name_row.addWidget(self.s2_role)
+        name_row.addStretch(1)
+        self.s2_server = label("", "idSub")
+        col.addLayout(name_row)
+        col.addWidget(self.s2_server)
+        switch = QPushButton("Sign out")
+        switch.setObjectName("link")
+        switch.setCursor(Qt.PointingHandCursor)
+        switch.clicked.connect(self.sign_out)
+        cl.addWidget(self.s2_avatar)
+        cl.addLayout(col, 1)
+        cl.addWidget(switch)
+        l.addWidget(chip)
+        l.addSpacing(22)
+
+        l.addWidget(self._field_label("Database"))
+        l.addSpacing(6)
+        self.db_dd = SearchDropdown("Select a database", multi=False, icon_kind="database")
+        self.db_dd.selectionChanged.connect(self._load_tables)
+        l.addWidget(self.db_dd)
+        l.addSpacing(16)
+
+        l.addWidget(self._field_label("Table"))
+        l.addSpacing(6)
+        self.tbl_dd = SearchDropdown("Select a table", multi=False, icon_kind="table")
+        self.tbl_dd.setEnabled(False)
+        l.addWidget(self.tbl_dd)
+        l.addSpacing(12)
+        self.err2 = Banner()
+        l.addWidget(self.err2)
+        l.addSpacing(12)
+
+        self.open_btn = QPushButton("Open dashboard")
+        self.open_btn.setObjectName("primary")
+        self.open_btn.setCursor(Qt.PointingHandCursor)
+        self.open_btn.setMinimumHeight(46)
+        self.open_btn.clicked.connect(self._open)
+        l.addWidget(self.open_btn)
+        return w
+
+    def _goto(self, step):
+        if step == 0:
+            self.step_lbl.setText("STEP 1 OF 2")
+            self.title_lbl.setText("Welcome back")
+            self.sub_lbl.setText(f"Sign in to continue to {APP_NAME}.")
+            self.step2.hide()
+            self.step1.show()
+            self.server_edit.setFocus()
+        else:
+            s = self.session
+            self.step_lbl.setText("STEP 2 OF 2")
+            self.title_lbl.setText("Choose your data")
+            self.sub_lbl.setText("Pick the database and table you want to explore.")
+            self.s2_avatar.setPixmap(make_avatar(s.login, 36))
+            self.s2_name.setText(short_name(s.login))
+            self.s2_role.setText(s.role)
+            self.s2_role.setProperty("role", s.role)
+            repolish(self.s2_role)
+            self.s2_server.setText(f"{s.login}  ·  {s.server}")
+            self.err2.hide()
+            self.step1.hide()
+            self.step2.show()
+
+    def show_source_step(self):
+        if self.session:
+            self._goto(1)
+        else:
+            self._goto(0)
+
+    def sign_out(self):
+        if self.session:
+            self.session.close()
+        self.session = None
+        self.db_dd.set_options([])
+        self.tbl_dd.set_options([])
+        self.tbl_dd.setEnabled(False)
+        self.err1.hide()
+        self._goto(0)
+
+    def _sign_in(self):
+        server = self.server_edit.text().strip()
+        if not server:
+            self.err1.show_msg("Enter the SQL Server name.")
+            return
+        self.err1.hide()
+        self.signin_btn.setText("Signing in…")
+        self.signin_btn.setEnabled(False)
+        QApplication.processEvents()
+        try:
+            with busy():
+                session = sign_in(server)
+        except AccessDenied as e:
+            self.err1.show_msg(str(e))
+            return
+        except Exception as e:
+            detail = str(e)
+            if len(detail) > 260:
+                detail = detail[:260] + "…"
+            self.err1.show_msg(f"Couldn't connect to {server}. Check the server name and "
+                               f"your network/VPN.\n\n{detail}")
+            return
+        finally:
+            self.signin_btn.setText("Sign in")
+            self.signin_btn.setEnabled(True)
+
+        self.session = session
+        try:
+            save_recent_server(server)
+        except Exception:
+            pass
+        self._refresh_recent()
+        if self._load_databases():
+            self._goto(1)
+
+    def _refresh_recent(self):
+        while self.recent_lay.count():
+            w = self.recent_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        recent = load_recent_servers()
+        self.recent_box.setVisible(bool(recent))
+        if not recent:
+            return
+        self.recent_lay.addWidget(label("Recent:", "recentLabel"))
+        for server in recent[:3]:
+            chip = QPushButton(server if len(server) <= 26 else server[:24] + "…")
+            chip.setObjectName("recentChip")
+            chip.setToolTip(server)
+            chip.setCursor(Qt.PointingHandCursor)
+            chip.clicked.connect(lambda _=False, sv=server: self._use_server(sv))
+            self.recent_lay.addWidget(chip)
+        self.recent_lay.addStretch(1)
+        clear = QPushButton("Clear")
+        clear.setObjectName("link")
+        clear.setCursor(Qt.PointingHandCursor)
+        clear.clicked.connect(self._clear_recent)
+        self.recent_lay.addWidget(clear)
+
+    def _use_server(self, server):
+        self.server_edit.setText(server)
+        self.server_edit.setFocus()
+
+    def _clear_recent(self):
+        clear_recent_servers()
+        self._refresh_recent()
+
+    def _load_databases(self):
+        try:
+            with busy():
+                cur = self.session.conn.cursor()
+                cur.execute(
+                    "SELECT name FROM sys.databases "
+                    "WHERE database_id > 4 AND state_desc = 'ONLINE' "
+                    "AND HAS_DBACCESS(name) = 1 ORDER BY name"
+                )
+                dbs = [r[0] for r in cur.fetchall() if r[0].lower() != ACCESS_DATABASE.lower()]
+        except Exception as e:
+            self.err1.show_msg(f"Signed in, but couldn't list databases.\n\n{e}")
+            return False
+        self.db_dd.set_options(dbs)
+        self.db_dd.clear_selection()
+        self.tbl_dd.set_options([])
+        self.tbl_dd.setEnabled(False)
+        return True
+
+    def _load_tables(self):
+        db = self.db_dd.value()
+        self.tbl_dd.set_options([])
+        self.tbl_dd.setEnabled(False)
+        if not db:
+            return
+        try:
+            with busy():
+                cur = self.session.conn.cursor()
+                cur.execute(
+                    f"SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE "
+                    f"FROM {q(db)}.INFORMATION_SCHEMA.TABLES ORDER BY TABLE_SCHEMA, TABLE_NAME"
+                )
+                rows = cur.fetchall()
+        except Exception as e:
+            self.err2.show_msg(f"Couldn't read tables from '{db}'.\n\n{e}")
+            return
+        self.err2.hide()
+        self.table_map = {}
+        for schema, name, ttype in rows:
+            lbl = f"{schema}.{name}" + ("  (view)" if ttype == "VIEW" else "")
+            self.table_map[lbl] = (schema, name)
+        self.tbl_dd.set_options(list(self.table_map))
+        self.tbl_dd.clear_selection()
+        self.tbl_dd.setEnabled(True)
+
+    def _open(self):
+        db = self.db_dd.value()
+        tlabel = self.tbl_dd.value()
+        if not db or not tlabel:
+            self.err2.show_msg("Select a database and a table.")
+            return
+        schema, table = self.table_map[tlabel]
+        try:
+            with busy():
+                conn = db_connect(self.session.server, db)
+                cur = conn.cursor()
+                cur.execute(f"SELECT TOP 0 * FROM {q(schema)}.{q(table)}")
+                cols = [d[0] for d in cur.description]
+        except Exception as e:
+            self.err2.show_msg(f"Couldn't open the table.\n\n{e}")
+            return
+
+        lower = {c.lower() for c in cols}
+        needed = [c for c, _, _ in FILTERS] + [c for c, _ in RESULT_COLUMNS]
+        if SEVERITY_COLUMN:
+            needed.append(SEVERITY_COLUMN)
+        missing = [c for c in dict.fromkeys(needed) if c.lower() not in lower]
+        if missing:
+            conn.close()
+            self.err2.show_msg(
+                "These columns from the CONFIG section aren't in this table: "
+                + ", ".join(missing)
+                + "\n\nColumns in this table: " + ", ".join(cols)
+            )
+            return
+        self.err2.hide()
+        self.opened.emit(self.session, conn, db, schema, table)
+
+
+class DashboardPage(QWidget):
+    def __init__(self, conn, schema, table):
+        super().__init__()
+        self.conn = conn
+        self.table_sql = f"{q(schema)}.{q(table)}"
+        self.table_name = table
+        self.rows = []
+        self.result_data = []
+        self._widths_set = False
+        lower_cols = [c.lower() for c, _ in RESULT_COLUMNS]
+        self.sev_idx = (lower_cols.index(SEVERITY_COLUMN.lower())
+                        if SEVERITY_COLUMN and SEVERITY_COLUMN.lower() in lower_cols else None)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(32, 24, 32, 24)
+        root.setSpacing(16)
+
+        fc = card()
+        fl = QVBoxLayout(fc)
+        fl.setContentsMargins(22, 18, 22, 20)
+        fl.setSpacing(14)
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        fi = QLabel()
+        fi.setPixmap(make_pix("filter", "#00A3E0", 18))
+        head.addWidget(fi)
+        head.addWidget(label("Filters", "cardTitle"))
+        head.addSpacing(8)
+        head.addWidget(label("Selections narrow each other. Type or paste values separated by commas "
+                             "or spaces and press Enter to select them.", "cardHint"), 1)
+        fl.addLayout(head)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(6)
+        self.dropdowns = []
+        for i, (col, lbl, ph) in enumerate(FILTERS):
+            dd = SearchDropdown(ph, multi=True,
+                                show_colors=bool(SEVERITY_COLUMN) and col.lower() == SEVERITY_COLUMN.lower())
+            dd.selectionChanged.connect(self.refresh_options)
+            grid.addWidget(label(lbl, "fieldLabel"), 0, i)
+            grid.addWidget(dd, 1, i)
+            grid.setColumnStretch(i, 1)
+            self.dropdowns.append(dd)
+        fl.addLayout(grid)
+
+        btns = QHBoxLayout()
+        btns.addStretch(1)
+        self.clear_btn = QPushButton("  Clear")
+        self.clear_btn.setObjectName("secondary")
+        self.clear_btn.setIcon(make_icon("refresh", "#334155", 16))
+        self.clear_btn.setCursor(Qt.PointingHandCursor)
+        self.clear_btn.setMinimumWidth(120)
+        self.clear_btn.clicked.connect(self.clear_all)
+        self.search_btn = QPushButton("  Search")
+        self.search_btn.setObjectName("primary")
+        self.search_btn.setIcon(make_icon("search", "#FFFFFF", 16))
+        self.search_btn.setCursor(Qt.PointingHandCursor)
+        self.search_btn.setMinimumWidth(140)
+        self.search_btn.clicked.connect(self.run_search)
+        btns.addWidget(self.clear_btn)
+        btns.addSpacing(10)
+        btns.addWidget(self.search_btn)
+        fl.addLayout(btns)
+        root.addWidget(fc)
+
+        self.applied = QFrame()
+        self.applied.setObjectName("appliedBar")
+        al = QHBoxLayout(self.applied)
+        al.setContentsMargins(16, 10, 16, 10)
+        al.setSpacing(10)
+        al.addWidget(label("Applied filters:", "appliedLabel"))
+        self.chips_box = QHBoxLayout()
+        self.chips_box.setSpacing(8)
+        al.addLayout(self.chips_box)
+        al.addStretch(1)
+        self.applied_count = label("", "appliedCount")
+        al.addWidget(self.applied_count)
+        self.applied.hide()
+        root.addWidget(self.applied)
+
+        rc = card()
+        rl = QVBoxLayout(rc)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(0)
+        rh = QHBoxLayout()
+        rh.setContentsMargins(22, 16, 22, 14)
+        rh.setSpacing(10)
+        rh.addWidget(label("Results", "cardTitle"))
+        self.count_lbl = label("", "cardHint")
+        rh.addWidget(self.count_lbl)
+        rh.addStretch(1)
+        self.action_msg = label("", "actionMsg")
+        rh.addWidget(self.action_msg)
+        self.copy_btn = QPushButton("  Copy")
+        self.copy_btn.setObjectName("smallSecondary")
+        self.copy_btn.setIcon(make_icon("copy", "#334155", 15))
+        self.copy_btn.setCursor(Qt.PointingHandCursor)
+        self.copy_btn.setToolTip("Copy the selected rows (or all rows) - paste straight into Excel")
+        self.copy_btn.clicked.connect(self.copy_rows)
+        self.export_btn = QPushButton("  Export to Excel")
+        self.export_btn.setObjectName("smallPrimary")
+        self.export_btn.setIcon(make_icon("download", "#FFFFFF", 15))
+        self.export_btn.setCursor(Qt.PointingHandCursor)
+        self.export_btn.clicked.connect(self.export_excel)
+        self.copy_btn.setEnabled(False)
+        self.export_btn.setEnabled(False)
+        rh.addWidget(self.copy_btn)
+        rh.addWidget(self.export_btn)
+        rl.addLayout(rh)
+
+        headers = [h for _, h in RESULT_COLUMNS]
+        self.table = make_table(headers)
+        self.table.setSortingEnabled(True)
+        self.table.setFocusPolicy(Qt.StrongFocus)
+        hh = self.table.horizontalHeader()
+        hh.setSectionResizeMode(QHeaderView.Interactive)
+        hh.setStretchLastSection(True)
+        hh.setMinimumSectionSize(70)
+        hh.setToolTip("Drag a column edge to resize. Double-click an edge to fit the content.")
+        QShortcut(QKeySequence.Copy, self.table, self.copy_rows)
+        if self.sev_idx is not None:
+            self.table.setItemDelegateForColumn(self.sev_idx, SeverityDelegate(self.table))
+
+        header_only = make_table(headers)
+        header_only.setFixedHeight(42)
+        header_only.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        header_only.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        header_only.setEnabled(False)
+
+        empty = QWidget()
+        el = QVBoxLayout(empty)
+        el.setAlignment(Qt.AlignCenter)
+        img = QLabel()
+        img.setPixmap(make_empty_illustration())
+        img.setAlignment(Qt.AlignCenter)
+        self.empty_title = label("No results to display", "emptyTitle")
+        self.empty_title.setAlignment(Qt.AlignCenter)
+        self.empty_sub = label("Choose filters above and click Search.", "emptySub")
+        self.empty_sub.setAlignment(Qt.AlignCenter)
+        el.addWidget(img)
+        el.addSpacing(4)
+        el.addWidget(self.empty_title)
+        el.addWidget(self.empty_sub)
+
+        empty_wrap = QWidget()
+        empty_wrap.setObjectName("whiteBox")
+        empty_wrap.setAttribute(Qt.WA_StyledBackground, True)
+        ew = QVBoxLayout(empty_wrap)
+        ew.setContentsMargins(0, 0, 0, 0)
+        ew.setSpacing(0)
+        ew.addWidget(header_only)
+        ew.addWidget(empty, 1)
+
+        self.stack = QStackedWidget()
+        self.stack.setObjectName("whiteBox")
+        self.stack.addWidget(empty_wrap)
+        self.stack.addWidget(self.table)
+        rl.addWidget(self.stack, 1)
+        root.addWidget(rc, 1)
+
+        self.load_data()
+
+    def load_data(self):
+        cols = ", ".join(q(c) for c, _, _ in FILTERS)
+        try:
+            with busy():
+                cur = self.conn.cursor()
+                cur.execute(f"SELECT DISTINCT {cols} FROM {self.table_sql}")
+                self.rows = [tuple(r) for r in cur.fetchall()]
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Couldn't load filter values.\n\n{e}")
+            self.rows = []
+        self.refresh_options()
+
+    def refresh_options(self):
+        n = len(self.dropdowns)
+        for _ in range(n + 1):
+            sel = [set(d.selected) for d in self.dropdowns]
+
+            def match(row, skip):
+                return all(i == skip or not sel[i] or row[i] in sel[i] for i in range(n))
+
+            changed = False
+            for i, dd in enumerate(self.dropdowns):
+                values = {r[i] for r in self.rows if r[i] is not None and match(r, i)}
+                if dd.set_options(values):
+                    changed = True
+            if not changed:
+                break
+
+    def run_search(self):
+        cols = ", ".join(q(c) for c, _ in RESULT_COLUMNS)
+        where, params = [], []
+        for (col, _, _), dd in zip(FILTERS, self.dropdowns):
+            vals = dd.selected_in_order()
+            if vals:
+                where.append(f"{q(col)} IN ({', '.join('?' * len(vals))})")
+                params.extend(vals)
+        sql = f"SELECT TOP ({MAX_RESULT_ROWS}) {cols} FROM {self.table_sql}"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        try:
+            with busy():
+                cur = self.conn.cursor()
+                cur.execute(sql, params)
+                data = cur.fetchall()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Search failed.\n\n{e}")
+            return
+        self.show_results(data)
+        self._show_applied(len(data))
+
+    def _show_applied(self, n):
+        while self.chips_box.count():
+            w = self.chips_box.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        any_sel = False
+        for (_, lbl, _), dd in zip(FILTERS, self.dropdowns):
+            vals = [fmt_value(v) for v in dd.selected_in_order()]
+            if not vals:
+                continue
+            any_sel = True
+            shown = ", ".join(vals[:3]) + (f"  +{len(vals) - 3} more" if len(vals) > 3 else "")
+            chip = QLabel(f"<b>{html.escape(lbl)}:</b> {html.escape(shown)}")
+            chip.setObjectName("chip")
+            chip.setToolTip(f"{lbl}: " + ", ".join(vals))
+            self.chips_box.addWidget(chip)
+        if not any_sel:
+            chip = QLabel("None – showing all records")
+            chip.setObjectName("chip")
+            self.chips_box.addWidget(chip)
+        limit = f" (limit {MAX_RESULT_ROWS:,})" if n >= MAX_RESULT_ROWS else ""
+        self.applied_count.setText(f"{n:,} record{'s' if n != 1 else ''} found{limit}")
+        self.applied.show()
+
+    def show_results(self, data):
+        self.table.setSortingEnabled(False)
+        self.table.setRowCount(0)
+        self.result_data = list(data)
+        self.copy_btn.setEnabled(bool(data))
+        self.export_btn.setEnabled(bool(data))
+        if not data:
+            self.count_lbl.setText("0 records")
+            self.empty_title.setText("No results to display")
+            self.empty_sub.setText("Adjust your filters and try again.")
+            self.stack.setCurrentIndex(0)
+        else:
+            self.table.setRowCount(len(data))
+            for r, row in enumerate(data):
+                for c, v in enumerate(row):
+                    is_sev = c == self.sev_idx
+                    item = SortItem(fmt_value(v))
+                    item.setData(SORT_ROLE, sort_key(v, is_sev))
+                    item.setToolTip(fmt_value(v))
+                    if c == 0:
+                        item.setData(ROW_ROLE, r)
+                    self.table.setItem(r, c, item)
+            self.table.setSortingEnabled(True)
+            n = len(data)
+            self.count_lbl.setText(f"{n:,} record{'s' if n != 1 else ''}")
+            if not self._widths_set:
+                each = max(110, (self.stack.width() - 24) // len(RESULT_COLUMNS))
+                for c in range(len(RESULT_COLUMNS) - 1):
+                    self.table.setColumnWidth(c, each)
+                self._widths_set = True
+            self.stack.setCurrentIndex(1)
+
+    def clear_all(self):
+        for dd in self.dropdowns:
+            dd.clear_selection()
+        self.refresh_options()
+        self.table.setRowCount(0)
+        self.result_data = []
+        self.copy_btn.setEnabled(False)
+        self.export_btn.setEnabled(False)
+        self.count_lbl.setText("")
+        self.applied.hide()
+        self.empty_title.setText("No results to display")
+        self.empty_sub.setText("Choose filters above and click Search.")
+        self.stack.setCurrentIndex(0)
+
+    def _flash(self, text):
+        self.action_msg.setText(text)
+        QTimer.singleShot(3500, lambda: self.action_msg.setText(""))
+
+    def _cell_text(self, r, c):
+        it = self.table.item(r, c)
+        text = it.text() if it else ""
+        return text.replace("\t", " ").replace("\r", " ").replace("\n", " ")
+
+    def copy_rows(self):
+        n = self.table.rowCount()
+        if not n:
+            return
+        rows = sorted({i.row() for i in self.table.selectedIndexes()}) or list(range(n))
+        cols = self.table.columnCount()
+        lines = ["\t".join(h for _, h in RESULT_COLUMNS)]
+        for r in rows:
+            lines.append("\t".join(self._cell_text(r, c) for c in range(cols)))
+        QApplication.clipboard().setText("\r\n".join(lines))
+        self._flash(f"Copied {len(rows):,} row{'s' if len(rows) != 1 else ''}")
+
+    def _rows_in_view(self):
+        out = []
+        for r in range(self.table.rowCount()):
+            it = self.table.item(r, 0)
+            idx = it.data(ROW_ROLE) if it else None
+            if idx is not None and 0 <= idx < len(self.result_data):
+                out.append(self.result_data[idx])
+        return out
+
+    def export_excel(self):
+        rows = self._rows_in_view()
+        if not rows:
+            return
+        headers = [h for _, h in RESULT_COLUMNS]
+        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+        base = re.sub(r"[^\w\-]+", "_", self.table_name).strip("_") or "results"
+        start = os.path.join(os.path.expanduser("~"), "Documents", f"{base}_{stamp}")
+        try:
+            import openpyxl
+            has_xlsx = True
+        except ImportError:
+            has_xlsx = False
+
+        if has_xlsx:
+            path, _ = QFileDialog.getSaveFileName(self, "Export to Excel", start + ".xlsx",
+                                                  "Excel workbook (*.xlsx)")
+            if not path:
+                return
+            if not path.lower().endswith(".xlsx"):
+                path += ".xlsx"
+        else:
+            ans = QMessageBox.question(
+                self, "Export",
+                "Saving as .xlsx needs the openpyxl package (pip install openpyxl).\n\n"
+                "Save as a CSV file instead? It opens in Excel too.",
+            )
+            if ans != QMessageBox.Yes:
+                return
+            path, _ = QFileDialog.getSaveFileName(self, "Export", start + ".csv", "CSV file (*.csv)")
+            if not path:
+                return
+            if not path.lower().endswith(".csv"):
+                path += ".csv"
+
+        try:
+            with busy():
+                if has_xlsx:
+                    self._write_xlsx(path, headers, rows)
+                else:
+                    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                        w = csv.writer(f)
+                        w.writerow(headers)
+                        for row in rows:
+                            w.writerow([fmt_value(v) for v in row])
+        except PermissionError:
+            QMessageBox.warning(self, "Export",
+                                "Couldn't save the file. If it's open in Excel, close it and try again.")
+            return
+        except Exception as e:
+            QMessageBox.warning(self, "Export", f"Couldn't save the file.\n\n{e}")
+            return
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Export complete")
+        box.setText(f"Saved {len(rows):,} row{'s' if len(rows) != 1 else ''} to:\n{path}")
+        open_btn = box.addButton("Open file", QMessageBox.AcceptRole)
+        box.addButton("Close", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is open_btn:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _write_xlsx(self, path, headers, rows):
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
+        from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+
+        def cell_value(v):
+            if isinstance(v, str):
+                return ILLEGAL_CHARACTERS_RE.sub("", v)
+            if isinstance(v, datetime.datetime):
+                return v.replace(tzinfo=None)
+            if v is None or isinstance(v, (bool, int, float, datetime.date, datetime.time)):
+                return v
+            if isinstance(v, decimal.Decimal):
+                return float(v)
+            if isinstance(v, (bytes, bytearray)):
+                return v.hex()
+            return str(v)
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = (re.sub(r"[\\/*?:\[\]]", "_", self.table_name) or "Results")[:31]
+        ws.append(headers)
+        head_font = Font(bold=True, color="FFFFFF")
+        head_fill = PatternFill("solid", fgColor="005587")
+        for c in ws[1]:
+            c.font = head_font
+            c.fill = head_fill
+            c.alignment = Alignment(vertical="center")
+        ws.row_dimensions[1].height = 22
+
+        widths = [len(h) for h in headers]
+        sev_styles = {}
+        for k, col in SEVERITY_COLORS.items():
+            sev_styles[k.lower()] = (
+                PatternFill("solid", fgColor=mix(col, "#FFFFFF", .82).name()[1:].upper()),
+                Font(bold=True, color=mix(col, "#000000", .38).name()[1:].upper()),
+            )
+
+        for r_i, row in enumerate(rows, start=2):
+            for c_i, v in enumerate(row, start=1):
+                cell = ws.cell(row=r_i, column=c_i, value=cell_value(v))
+                if isinstance(v, datetime.datetime):
+                    cell.number_format = "dd-mm-yyyy hh:mm"
+                elif isinstance(v, datetime.date):
+                    cell.number_format = "dd-mm-yyyy"
+                if c_i - 1 == self.sev_idx and v is not None:
+                    style = sev_styles.get(str(v).strip().lower())
+                    if style:
+                        cell.fill, cell.font = style
+                widths[c_i - 1] = max(widths[c_i - 1], len(fmt_value(v)))
+
+        for i, w in enumerate(widths, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = min(max(w, 8) + 2, 60)
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+        wb.save(path)
+
+    def close_conn(self):
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+
+
+class UsersPage(QWidget):
+    def __init__(self, session):
+        super().__init__()
+        self.session = session
+        root = QVBoxLayout(self)
+        root.setContentsMargins(32, 24, 32, 24)
+        root.setSpacing(16)
+
+        ac = card()
+        al = QVBoxLayout(ac)
+        al.setContentsMargins(22, 18, 22, 20)
+        al.setSpacing(12)
+        h = QHBoxLayout()
+        h.setSpacing(10)
+        ui = QLabel()
+        ui.setPixmap(make_pix("users", "#00A3E0", 18))
+        h.addWidget(ui)
+        h.addWidget(label("Add a user", "cardTitle"))
+        h.addSpacing(8)
+        h.addWidget(label(r"Enter their Windows login as DOMAIN\username and pick a role. "
+                          "They can sign in straight away.", "cardHint"), 1)
+        al.addLayout(h)
+
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        self.new_user = QLineEdit()
+        self.new_user.setPlaceholderText(r"DOMAIN\username")
+        self.new_user.addAction(make_icon("user", "#94A3B8", 18), QLineEdit.LeadingPosition)
+        self.new_user.returnPressed.connect(self.add)
+        self.role_combo = QComboBox()
+        self.role_combo.addItems(["Member", "Admin"])
+        self.role_combo.setFixedWidth(160)
+        self.role_combo.setToolTip("Member: view the dashboard only\n"
+                                   "Admin: also add / remove users and admins")
+        add_btn = QPushButton("  Add user")
+        add_btn.setObjectName("primary")
+        add_btn.setIcon(make_icon("plus", "#FFFFFF", 16))
+        add_btn.setCursor(Qt.PointingHandCursor)
+        add_btn.clicked.connect(self.add)
+        row.addWidget(self.new_user, 1)
+        row.addWidget(self.role_combo)
+        row.addWidget(add_btn)
+        al.addLayout(row)
+        self.msg = Banner()
+        al.addWidget(self.msg)
+        al.addWidget(label("Member: can only view the dashboard.   ·   Admin: can also add and "
+                           "remove users and admins.   ·   To change someone's role, add them "
+                           "again with the new role.", "cardHint"))
+        root.addWidget(ac)
+
+        mc = card()
+        ml = QVBoxLayout(mc)
+        ml.setContentsMargins(0, 0, 0, 0)
+        ml.setSpacing(0)
+        mh = QHBoxLayout()
+        mh.setContentsMargins(22, 16, 22, 14)
+        mh.addWidget(label("Users", "cardTitle"))
+        mh.addSpacing(10)
+        self.count = label("", "cardHint")
+        mh.addWidget(self.count)
+        mh.addStretch(1)
+        ref = QPushButton("Refresh")
+        ref.setObjectName("link")
+        ref.setCursor(Qt.PointingHandCursor)
+        ref.clicked.connect(self.refresh)
+        mh.addWidget(ref)
+        ml.addLayout(mh)
+        self.table = make_table(["Username", "Role", "Added by", "Added on", ""])
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
+        self.table.setColumnWidth(4, 130)
+        self.table.verticalHeader().setDefaultSectionSize(52)
+        self.table.setSelectionMode(QAbstractItemView.NoSelection)
+        ml.addWidget(self.table, 1)
+        root.addWidget(mc, 1)
+
+        self.refresh()
+
+    def refresh(self):
+        try:
+            with busy():
+                rows = fetch_members(self.session.conn)
+        except Exception as e:
+            self.table.setRowCount(0)
+            self.count.setText("")
+            self.msg.show_msg(f"Couldn't read the user list. Make sure portal_setup.sql has been "
+                              f"run.\n\n{sql_msg(e)}")
+            return
+        self.table.setRowCount(len(rows))
+        for r, (user, role, by, on) in enumerate(rows):
+            role = "Admin" if str(role or "").strip().lower() == "admin" else "Member"
+            self.table.setItem(r, 0, QTableWidgetItem(str(user)))
+            badge = label(role, "roleBadge")
+            badge.setProperty("role", role)
+            self.table.setCellWidget(r, 1, self._wrap(badge))
+            self.table.setItem(r, 2, QTableWidgetItem(str(by or "")))
+            self.table.setItem(r, 3, QTableWidgetItem(fmt_value(on)))
+            btn = QPushButton("  Remove")
+            btn.setObjectName("danger")
+            btn.setIcon(make_icon("trash", "#B91C1C", 14))
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, u=user: self.remove(u))
+            self.table.setCellWidget(r, 4, self._wrap(btn))
+        admins = sum(1 for _, role, *_ in rows if str(role or "").strip().lower() == "admin")
+        self.count.setText(f"{len(rows)} user{'s' if len(rows) != 1 else ''}  ·  "
+                           f"{admins} admin{'s' if admins != 1 else ''}")
+
+    @staticmethod
+    def _wrap(w):
+        box = QWidget()
+        l = QHBoxLayout(box)
+        l.setContentsMargins(14, 0, 8, 0)
+        box.setAttribute(Qt.WA_TranslucentBackground)
+        if isinstance(w, QLabel):
+            w.setFixedHeight(22)
+            w.setFixedWidth(w.sizeHint().width() + 4)
+        l.addWidget(w, 0, Qt.AlignVCenter)
+        l.addStretch(1)
+        return box
+
+    def add(self):
+        if not self.session.is_admin:
+            return
+        name = self.new_user.text().strip()
+        role = self.role_combo.currentText()
+        if not name:
+            self.msg.show_msg("Enter a Windows username.")
+            return
+        if same_user(name, self.session.login) and role != "Admin":
+            self.msg.show_msg("You can't remove your own admin rights.", "info")
+            return
+        try:
+            with busy():
+                result = save_member(self.session.conn, name, role)
+        except Exception as e:
+            self.msg.show_msg(f"Couldn't save {name}: {sql_msg(e)}")
+            return
+        tip = "" if "\\" in name else r"  Tip: include the domain (DOMAIN\username) to be exact."
+        if result == "unchanged":
+            self.msg.show_msg(f"{name} is already {'an' if role == 'Admin' else 'a'} {role}.", "info")
+        elif result == "updated":
+            self.msg.show_msg(f"{name} is now {'an' if role == 'Admin' else 'a'} {role}.", "success")
+        else:
+            self.msg.show_msg(f"Added {name} as {role}. They can sign in now.{tip}", "success")
+        self.new_user.clear()
+        self.refresh()
+
+    def remove(self, username):
+        if not self.session.is_admin:
+            return
+        if same_user(username, self.session.login):
+            self.msg.show_msg("You can't remove yourself.", "info")
+            return
+        ans = QMessageBox.question(self, "Remove user",
+                                   f"Remove {username} from the portal?\n"
+                                   "They won't be able to sign in any more.")
+        if ans != QMessageBox.Yes:
+            return
+        try:
+            with busy():
+                remove_member(self.session.conn, username)
+        except Exception as e:
+            self.msg.show_msg(f"Couldn't remove {username}: {sql_msg(e)}")
+            return
+        self.msg.show_msg(f"Removed {username}.", "success")
+        self.refresh()
+
+
+class PortalPage(QWidget):
+    sign_out = Signal()
+    change_source = Signal()
+
+    PAGES = [
+        ("Dashboard", "Filter and review records from the selected table."),
+        ("Manage Users", "Add users and admins, and control who can sign in."),
+    ]
+
+    def __init__(self, session, conn, db, schema, table):
+        super().__init__()
+        self.session = session
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        root.addWidget(self._build_sidebar())
+
+        main = QWidget()
+        ml = QVBoxLayout(main)
+        ml.setContentsMargins(0, 0, 0, 0)
+        ml.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("header")
+        header.setFixedHeight(76)
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(32, 0, 32, 0)
+        tcol = QVBoxLayout()
+        tcol.setSpacing(2)
+        tcol.addStretch(1)
+        self.page_title = label("", "pageTitle")
+        self.page_sub = label("", "pageSub")
+        tcol.addWidget(self.page_title)
+        tcol.addWidget(self.page_sub)
+        tcol.addStretch(1)
+        hl.addLayout(tcol)
+        hl.addStretch(1)
+        pill = QFrame()
+        pill.setObjectName("sourcePill")
+        pl = QHBoxLayout(pill)
+        pl.setContentsMargins(14, 7, 16, 7)
+        pl.setSpacing(10)
+        di = QLabel()
+        di.setPixmap(make_pix("database", "#00A3E0", 18))
+        pc = QVBoxLayout()
+        pc.setSpacing(0)
+        pc.addWidget(label(f"{db}  /  {schema}.{table}", "sourceText"))
+        pc.addWidget(label(session.server, "sourceServer"))
+        pl.addWidget(di)
+        pl.addLayout(pc)
+        hl.addWidget(pill, 0, Qt.AlignVCenter)
+        ml.addWidget(header)
+
+        self.pages = QStackedWidget()
+        self.dash = DashboardPage(conn, schema, table)
+        self.pages.addWidget(self.dash)
+        if session.is_admin:
+            self.pages.addWidget(UsersPage(session))
+        ml.addWidget(self.pages, 1)
+        root.addWidget(main, 1)
+        self._show(0)
+
+    def _build_sidebar(self):
+        sb = QFrame()
+        sb.setObjectName("sidebar")
+        sb.setFixedWidth(250)
+        l = QVBoxLayout(sb)
+        l.setContentsMargins(16, 22, 16, 16)
+        l.setSpacing(4)
+
+        plate = QFrame()
+        plate.setObjectName("logoPlate")
+        pl = QVBoxLayout(plate)
+        pl.setContentsMargins(10, 10, 10, 10)
+        pl.addWidget(brand_logo(198), 0, Qt.AlignCenter)
+        l.addWidget(plate)
+        l.addSpacing(10)
+        nm = label(APP_NAME, "sbBrand")
+        nm.setContentsMargins(6, 0, 0, 0)
+        l.addWidget(nm)
+        l.addSpacing(26)
+        l.addWidget(label("MENU", "sbSection"))
+        l.addSpacing(6)
+
+        self.nav = QButtonGroup(self)
+        self.nav.setExclusive(True)
+        items = [("dashboard", "Dashboard", 0)]
+        if self.session.is_admin:
+            items.append(("users", "Manage Users", 1))
+        for kind, text, idx in items:
+            b = QPushButton(f"  {text}")
+            b.setObjectName("navBtn")
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setIcon(make_icon(kind, "#D6EBF5", 18, checked_color="#FFFFFF"))
+            b.setIconSize(QSize(18, 18))
+            b.clicked.connect(lambda _=False, i=idx: self._show(i))
+            self.nav.addButton(b, idx)
+            l.addWidget(b)
+
+        src = QPushButton("  Change Data Source")
+        src.setObjectName("navBtn")
+        src.setCursor(Qt.PointingHandCursor)
+        src.setIcon(make_icon("swap", "#D6EBF5", 18))
+        src.setIconSize(QSize(18, 18))
+        src.clicked.connect(self.change_source.emit)
+        l.addWidget(src)
+        l.addStretch(1)
+
+        uc = QFrame()
+        uc.setObjectName("sbUser")
+        ul = QHBoxLayout(uc)
+        ul.setContentsMargins(10, 10, 6, 10)
+        ul.setSpacing(10)
+        av = QLabel()
+        av.setPixmap(make_avatar(self.session.login, 36))
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        un = label(short_name(self.session.login), "sbUserName")
+        un.setToolTip(self.session.login)
+        col.addWidget(un)
+        col.addWidget(label(self.session.role, "sbUserRole"))
+        out = QPushButton()
+        out.setObjectName("iconBtn")
+        out.setIcon(make_icon("logout", "#D6EBF5", 18))
+        out.setIconSize(QSize(18, 18))
+        out.setToolTip("Sign out")
+        out.setCursor(Qt.PointingHandCursor)
+        out.clicked.connect(self.sign_out.emit)
+        ul.addWidget(av)
+        ul.addLayout(col, 1)
+        ul.addWidget(out)
+        l.addWidget(uc)
+        return sb
+
+    def _show(self, i):
+        self.pages.setCurrentIndex(i)
+        btn = self.nav.button(i)
+        if btn:
+            btn.setChecked(True)
+        title, sub = self.PAGES[i]
+        self.page_title.setText(title)
+        self.page_sub.setText(sub)
+
+    def close_conn(self):
+        self.dash.close_conn()
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(APP_NAME)
+        self.setWindowIcon(QIcon(make_pix("logo", size=32)))
+        self.resize(1360, 860)
+        self.setMinimumSize(1100, 720)
+
+        self.stack = QStackedWidget()
+        self.stack.setObjectName("root")
+        self.setCentralWidget(self.stack)
+        self.login = LoginPage()
+        self.login.opened.connect(self.open_portal)
+        self.stack.addWidget(self.login)
+        self.portal = None
+
+    def open_portal(self, session, conn, db, schema, table):
+        self._drop_portal()
+        self.portal = PortalPage(session, conn, db, schema, table)
+        self.portal.sign_out.connect(self.sign_out)
+        self.portal.change_source.connect(self.change_source)
+        self.stack.addWidget(self.portal)
+        self.stack.setCurrentWidget(self.portal)
+
+    def change_source(self):
+        self._drop_portal()
+        self.login.show_source_step()
+        self.stack.setCurrentWidget(self.login)
+
+    def sign_out(self):
+        self._drop_portal()
+        self.login.sign_out()
+        self.stack.setCurrentWidget(self.login)
+
+    def _drop_portal(self):
+        if self.portal:
+            self.portal.close_conn()
+            self.stack.removeWidget(self.portal)
+            self.portal.deleteLater()
+            self.portal = None
+
+    def closeEvent(self, e):
+        self._drop_portal()
+        self.login.sign_out()
+        super().closeEvent(e)
+
+
+STYLE = """
+* { font-family: 'Segoe UI', 'Segoe UI Variable Text', Arial, sans-serif; color: #0F172A; }
+QMainWindow, #root { background: #F3F8FB; }
+QToolTip { background: #0F172A; color: white; border: none; padding: 6px 8px; }
+
+#formSide { background: #FFFFFF; }
+#brandName { color: white; font-size: 18px; font-weight: 700; }
+#brandHeadline { color: white; font-size: 36px; font-weight: 700; }
+#brandSub { color: rgba(255,255,255,200); font-size: 15px; }
+#featIcon { background: rgba(255,255,255,30); border-radius: 10px; }
+#featTitle { color: white; font-size: 14px; font-weight: 600; }
+#featText { color: rgba(255,255,255,175); font-size: 13px; }
+#brandFoot { color: rgba(255,255,255,140); font-size: 12px; }
+
+#stepLabel { color: #00A3E0; font-size: 12px; font-weight: 700; }
+#loginTitle { font-size: 30px; font-weight: 700; }
+#loginSub { color: #64748B; font-size: 15px; }
+#fieldLabel { font-size: 13px; font-weight: 600; color: #334155; }
+#identity, #sessionChip { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; }
+#idName { font-size: 14px; font-weight: 600; }
+#idSub { font-size: 12px; color: #64748B; }
+#note { color: #64748B; font-size: 12px; }
+#formFoot { color: #94A3B8; font-size: 12px; }
+#roleBadge { background: #CCEDF9; color: #005587; border-radius: 9px; padding: 1px 10px;
+             font-size: 11px; font-weight: 700; }
+#roleBadge[role="Member"] { background: #F1F5F9; color: #475569; }
+
+#banner { border-radius: 8px; }
+#banner[kind="error"]   { background: #FEF2F2; border: 1px solid #FECACA; }
+#banner[kind="success"] { background: #F0FDF4; border: 1px solid #BBF7D0; }
+#banner[kind="info"]    { background: #E6F6FC; border: 1px solid #99DAF2; }
+#banner[kind="error"] #bannerText   { color: #991B1B; font-size: 13px; }
+#banner[kind="success"] #bannerText { color: #166534; font-size: 13px; }
+#banner[kind="info"] #bannerText    { color: #004670; font-size: 13px; }
+
+QLineEdit {
+    background: white; border: 1px solid #CBD5E1; border-radius: 8px;
+    padding: 0 10px; min-height: 42px; font-size: 14px;
+    selection-background-color: #99DAF2; selection-color: #0F172A;
+}
+QLineEdit:hover { border-color: #94A3B8; }
+QLineEdit:focus { border-color: #00A3E0; }
+QComboBox {
+    background: white; border: 1px solid #CBD5E1; border-radius: 8px;
+    padding: 0 12px; min-height: 42px; font-size: 14px;
+}
+QComboBox:hover { border-color: #94A3B8; }
+QComboBox::drop-down { border: none; width: 28px; }
+QComboBox QAbstractItemView {
+    background: white; border: 1px solid #CBD5E1; outline: 0; padding: 4px;
+    selection-background-color: #E6F6FC; selection-color: #0F172A;
+}
+
+#ddField { background: white; border: 1px solid #CBD5E1; border-radius: 8px; }
+#ddField:hover { border-color: #94A3B8; }
+#ddField:focus, #ddField[open="true"] { border-color: #00A3E0; }
+#ddField:disabled { background: #F1F5F9; border-color: #E2E8F0; }
+#ddText { font-size: 14px; }
+#ddText[placeholder="true"] { color: #94A3B8; }
+#ddBadge { background: #00A3E0; color: white; border-radius: 9px; padding: 1px 7px;
+           font-size: 11px; font-weight: 700; }
+#ddPopup { background: white; border: 1px solid #CBD5E1; border-radius: 10px; }
+#ddSearch { min-height: 36px; font-size: 13px; background: #F8FAFC; border: 1px solid #E2E8F0; }
+#ddSearch:focus { background: white; border-color: #00A3E0; }
+#ddList { border: none; background: white; outline: 0; font-size: 14px; }
+#ddHint { background: #E6F6FC; color: #005587; border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+#ddHint[error="true"] { background: #FFF7ED; color: #C2410C; }
+#ddEmpty { color: #94A3B8; font-size: 13px; padding: 16px; }
+
+QPushButton { border-radius: 8px; padding: 0 18px; min-height: 42px; font-size: 14px; font-weight: 600; }
+QPushButton#primary { background: #005587; color: white; border: none; }
+QPushButton#primary:hover { background: #00A3E0; }
+QPushButton#primary:pressed { background: #004670; }
+QPushButton#primary:disabled { background: #8FC3DD; }
+QPushButton#secondary { background: white; border: 1px solid #CBD5E1; color: #0F172A; }
+QPushButton#secondary:hover { background: #F8FAFC; border-color: #94A3B8; }
+QPushButton#smallPrimary { background: #005587; color: white; border: none; min-height: 30px;
+                           padding: 0 14px; font-size: 12px; border-radius: 6px; }
+QPushButton#smallPrimary:hover { background: #00A3E0; }
+QPushButton#smallPrimary:disabled { background: #B8D3E2; color: white; }
+QPushButton#smallSecondary { background: white; border: 1px solid #CBD5E1; color: #0F172A;
+                             min-height: 30px; padding: 0 14px; font-size: 12px; border-radius: 6px; }
+QPushButton#smallSecondary:hover { background: #F8FAFC; border-color: #94A3B8; }
+QPushButton#smallSecondary:disabled { color: #94A3B8; border-color: #E2E8F0; }
+QPushButton#recentChip { background: #F1F7FB; border: 1px solid #D6EBF5; color: #005587;
+                         min-height: 24px; padding: 0 10px; font-size: 12px; font-weight: 600;
+                         border-radius: 12px; }
+QPushButton#recentChip:hover { background: #E6F6FC; border-color: #00A3E0; }
+#recentLabel { color: #64748B; font-size: 12px; }
+#actionMsg { color: #15803D; font-size: 12px; font-weight: 600; }
+QPushButton#link { background: transparent; border: none; color: #005587; padding: 0;
+                   min-height: 0; font-size: 13px; font-weight: 600; }
+QPushButton#link:hover { color: #00A3E0; text-decoration: underline; }
+QPushButton#danger { background: white; border: 1px solid #FECACA; color: #B91C1C;
+                     min-height: 30px; padding: 0 12px; font-size: 12px; border-radius: 6px; }
+QPushButton#danger:hover { background: #FEF2F2; }
+
+#sidebar { background: #005587; }
+#sbBrand { color: white; font-size: 14px; font-weight: 700; }
+#sbBrandSub { color: rgba(255,255,255,170); font-size: 11px; }
+#sbSection { color: rgba(255,255,255,140); font-size: 11px; font-weight: 700; padding-left: 12px; }
+QPushButton#navBtn { background: transparent; border: none; color: #D6EBF5; text-align: left;
+                     padding: 0 12px; min-height: 42px; font-size: 14px; font-weight: 500; }
+QPushButton#navBtn:hover { background: #00699F; color: white; }
+QPushButton#navBtn:checked { background: #00A3E0; color: white; font-weight: 600; }
+#sbUser { background: #004670; border-radius: 10px; }
+#sbUserName { color: white; font-size: 13px; font-weight: 600; }
+#sbUserRole { color: #D6EBF5; font-size: 12px; }
+QPushButton#iconBtn { background: transparent; border: none; min-height: 34px; min-width: 34px;
+                      max-width: 34px; padding: 0; border-radius: 8px; }
+QPushButton#iconBtn:hover { background: #00699F; }
+
+#header { background: white; border-bottom: 1px solid #E2E8F0; }
+#pageTitle { font-size: 20px; font-weight: 700; }
+#pageSub { color: #64748B; font-size: 13px; }
+#sourcePill { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; }
+#sourceText { font-size: 13px; font-weight: 600; color: #1E293B; }
+#sourceServer { font-size: 11px; color: #64748B; }
+
+#card { background: white; border: 1px solid #E2E8F0; border-radius: 12px; }
+#whiteBox { background: white; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
+#cardTitle { font-size: 16px; font-weight: 700; }
+#cardHint { color: #64748B; font-size: 12px; }
+#appliedBar { background: #E6F6FC; border: 1px solid #99DAF2; border-radius: 10px; }
+#appliedLabel { color: #005587; font-size: 13px; font-weight: 700; }
+#chip { background: white; border: 1px solid #99DAF2; border-radius: 13px; padding: 3px 12px;
+        font-size: 13px; color: #1E293B; }
+#appliedCount { color: #004670; font-size: 13px; font-weight: 600; }
+#logoSlot { background: #F5FBFE; border: 2px dashed #99DAF2; border-radius: 8px;
+            color: #00A3E0; font-size: 12px; font-weight: 600; }
+#logoPlate { background: white; border-radius: 10px; }
+#emptyTitle { font-size: 18px; font-weight: 700; }
+#emptySub { color: #64748B; font-size: 14px; }
+
+QTableWidget { border: none; background: white; alternate-background-color: #FAFBFD;
+               selection-background-color: #E6F6FC; selection-color: #0F172A;
+               font-size: 13px; outline: 0; }
+QTableWidget::item { padding-left: 14px; border-bottom: 1px solid #F1F5F9; }
+QHeaderView::section { background: #F8FAFC; color: #475569; font-size: 12px; font-weight: 700;
+                       padding: 0 14px; border: none; border-top: 1px solid #E2E8F0;
+                       border-bottom: 1px solid #E2E8F0; }
+QTableCornerButton::section { background: #F8FAFC; border: none; }
+
+QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+QScrollBar::handle:vertical { background: #CBD5E1; border-radius: 3px; min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: #94A3B8; }
+QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px; }
+QScrollBar::handle:horizontal { background: #CBD5E1; border-radius: 3px; min-width: 30px; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: none; }
+
+QMessageBox { background: white; }
+QMessageBox QLabel { font-size: 13px; }
+QMessageBox QPushButton { min-width: 80px; min-height: 34px; background: white;
+                          border: 1px solid #CBD5E1; }
+"""
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    f = QFont("Segoe UI")
+    f.setPixelSize(14)
+    app.setFont(f)
+    app.setStyleSheet(STYLE)
+    w = MainWindow()
+    w.showMaximized()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
