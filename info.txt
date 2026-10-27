@@ -1,138 +1,152 @@
-import struct
-import sys
+CREATE DATABASE DRawDB;
+GO
 
-from PySide6.QtCore import QBuffer, QIODevice, Qt
-from PySide6.QtWidgets import QApplication
+USE DRawDB;
+GO
 
-import sql_filter_tool as app_code
+CREATE TABLE Departments (
+    DepartmentID INT PRIMARY KEY,
+    DepartmentName VARCHAR(50)
+);
 
-qt = QApplication(sys.argv)
-base = app_code.make_pix("logo", size=128).toImage()
+CREATE TABLE Employees (
+    EmployeeID INT PRIMARY KEY,
+    EmployeeName VARCHAR(100),
+    Age INT,
+    Salary DECIMAL(10,2),
+    DepartmentID INT,
+    JoiningDate DATE,
+    FOREIGN KEY (DepartmentID)
+        REFERENCES Departments(DepartmentID)
+);
 
-sizes = [16, 24, 32, 48, 64, 128, 256]
-images = []
-for size in sizes:
-    img = base.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-    buf = QBuffer()
-    buf.open(QIODevice.WriteOnly)
-    img.save(buf, "PNG")
-    images.append(bytes(buf.data()))
+INSERT INTO Departments VALUES
+(1, 'IT'),
+(2, 'HR'),
+(3, 'Finance'),
+(4, 'Marketing');
 
-header = struct.pack("<HHH", 0, 1, len(sizes))
-offset = 6 + 16 * len(sizes)
-entries = b""
-data = b""
-for size, png in zip(sizes, images):
-    entries += struct.pack("<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(png), offset + len(data))
-    data += png
+INSERT INTO Employees VALUES
+(101, 'Arun', 25, 45000, 1, '2024-01-15'),
+(102, 'Priya', 28, 55000, 1, '2023-06-10'),
+(103, 'Rahul', 30, 40000, 2, '2022-03-20'),
+(104, 'Sneha', 27, 60000, 3, '2021-11-05'),
+(105, 'Vishnu', 24, 35000, 2, '2025-02-01'),
+(106, 'Anjali', 29, 70000, 3, '2020-08-12'),
+(107, 'Akhil', 26, 50000, 1, '2024-09-18'),
+(108, 'Meera', 31, 65000, 4, '2019-05-25');
 
-with open("app.ico", "wb") as f:
-    f.write(header + entries + data)
+SELECT * FROM Employees;
 
-print("app.ico created")
+SELECT *
+FROM Employees
+WHERE Salary > 45000;
 
+SELECT *
+FROM Employees
+ORDER BY Salary DESC;
 
+SELECT TOP 3 *
+FROM Employees
+ORDER BY Salary DESC;
 
+SELECT COUNT(*) AS TotalEmployees
+FROM Employees;
 
+SELECT
+    DepartmentID,
+    COUNT(*) AS TotalEmployees,
+    AVG(Salary) AS AverageSalary,
+    SUM(Salary) AS TotalSalary
+FROM Employees
+GROUP BY DepartmentID;
 
+SELECT
+    DepartmentID,
+    AVG(Salary) AS AverageSalary
+FROM Employees
+GROUP BY DepartmentID
+HAVING AVG(Salary) > 45000;
 
+SELECT
+    E.EmployeeName,
+    E.Salary,
+    D.DepartmentName
+FROM Employees E
+INNER JOIN Departments D
+    ON E.DepartmentID = D.DepartmentID;
 
+SELECT
+    D.DepartmentName,
+    E.EmployeeName
+FROM Departments D
+LEFT JOIN Employees E
+    ON D.DepartmentID = E.DepartmentID;
 
+SELECT
+    EmployeeName,
+    Salary,
+    DepartmentID
+FROM Employees E
+WHERE Salary > (
+    SELECT AVG(Salary)
+    FROM Employees
+    WHERE DepartmentID = E.DepartmentID
+);
 
+UPDATE Employees
+SET Salary = 50000
+WHERE EmployeeID = 101;
 
+ALTER TABLE Employees
+ADD Email VARCHAR(100);
 
+UPDATE Employees
+SET Email = 'arun@company.com'
+WHERE EmployeeID = 101;
 
+SELECT
+    EmployeeName,
+    Salary,
+    CASE
+        WHEN Salary >= 60000 THEN 'High Salary'
+        WHEN Salary >= 40000 THEN 'Medium Salary'
+        ELSE 'Low Salary'
+    END AS SalaryCategory
+FROM Employees;
 
-def find_file(name):
-    if os.path.isabs(name):
-        return name if os.path.exists(name) else None
-    places = [app_dir()]
-    bundle = getattr(sys, "_MEIPASS", None)
-    if bundle:
-        places.append(bundle)
-    for folder in places:
-        path = os.path.join(folder, name)
-        if os.path.exists(path):
-            return path
-    return None
-
-
-def brand_logo(width, file=None):
-    h = round(width * 392 / 1024)
-    lbl = QLabel()
-    lbl.setFixedSize(width, h)
-    lbl.setAlignment(Qt.AlignCenter)
-    path = find_file(file) if file else None
-    if not path:
-        path = find_file(LOGO_FILE)
-    pm = QPixmap(path) if path else QPixmap()
-    if not pm.isNull():
-        r = _dpr()
-        pm = pm.scaled(int(width * r), int(h * r), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        pm.setDevicePixelRatio(r)
-        lbl.setPixmap(pm)
-    else:
-        lbl.setObjectName("logoSlot")
-        lbl.setText("Your logo here\n1024 × 392")
-        lbl.setToolTip(f"Save your logo as: {os.path.join(app_dir(), file or LOGO_FILE)}")
-    return lbl
-
-
---------------------------------------------------------------------------------
-import os
-
-APP_NAME = "DataInsightPortal"
-SCRIPT = "sql_filter_tool.py"
-ICON = "app.ico" if os.path.exists("app.ico") else None
-
-datas = [(f, ".") for f in ("logo.png", "logo_white.png") if os.path.exists(f)]
-
-a = Analysis(
-    [SCRIPT],
-    pathex=[],
-    binaries=[],
-    datas=datas,
-    hiddenimports=[],
-    hookspath=[],
-    runtime_hooks=[],
-    excludes=[
-        "tkinter", "unittest", "pydoc", "doctest", "test", "lib2to3", "xmlrpc",
-        "numpy", "pandas", "scipy", "matplotlib", "PIL", "lxml", "IPython", "jedi",
-        "setuptools", "pkg_resources",
-        "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuickWidgets", "PySide6.QtPdf",
-        "PySide6.QtSql", "PySide6.QtWebEngineCore", "PySide6.QtMultimedia", "PySide6.QtCharts",
-    ],
-    noarchive=False,
+WITH SalaryRanking AS (
+    SELECT
+        EmployeeName,
+        DepartmentID,
+        Salary,
+        DENSE_RANK() OVER (
+            PARTITION BY DepartmentID
+            ORDER BY Salary DESC
+        ) AS SalaryRank
+    FROM Employees
 )
+SELECT *
+FROM SalaryRanking
+WHERE SalaryRank = 1;
+GO
 
-drop = (
-    "opengl32sw", "/translations/",
-    "qt6quick", "qt6qml", "qt6pdf", "qt6virtualkeyboard",
-    "qt6webengine", "qt6multimedia", "qt6charts", "qt6designer", "qt6help", "qt63d",
-    "plugins/platforminputcontexts/", "plugins/sqldrivers/",
-)
+CREATE VIEW EmployeeDetails AS
+SELECT
+    E.EmployeeID,
+    E.EmployeeName,
+    E.Salary,
+    D.DepartmentName
+FROM Employees E
+INNER JOIN Departments D
+    ON E.DepartmentID = D.DepartmentID;
+GO
 
+SELECT * FROM EmployeeDetails;
 
-def keep(entry):
-    name = entry[0].replace("\\", "/").lower()
-    return not any(d in name for d in drop)
+DELETE FROM Employees
+WHERE EmployeeID = 107;
 
+SELECT * FROM Employees;
 
-a.binaries = [b for b in a.binaries if keep(b)]
-a.datas = [d for d in a.datas if keep(d)]
-
-pyz = PYZ(a.pure)
-
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name=APP_NAME,
-    debug=False,
-    strip=False,
-    upx=False,
-    console=False,
-    icon=ICON,
-)
+SELECT * FROM Departments;
